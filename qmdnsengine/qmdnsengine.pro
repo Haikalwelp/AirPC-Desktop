@@ -1,5 +1,5 @@
 QT -= gui
-QT += network
+QT += core network
 
 TARGET = qmdnsengine
 TEMPLATE = lib
