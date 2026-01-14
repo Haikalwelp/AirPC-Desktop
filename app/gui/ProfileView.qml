@@ -4,9 +4,9 @@ import QtQuick.Layouts
 
 FocusScope {
     id: root
-    objectName: qsTr("Playtime")
+    objectName: qsTr("Profile")
 
-    // Background Gradient matching AirPCLoginView style
+    // Background Gradient matching AirPCLoginView
     Rectangle {
         id: background
         anchors.fill: parent
@@ -25,7 +25,7 @@ FocusScope {
         spacing: 12
 
         Text {
-            text: qsTr("Playtime")
+            text: qsTr("Profile")
             font.pointSize: 28
             font.bold: true
             color: "#FFFFFF"
