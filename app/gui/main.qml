@@ -249,44 +249,74 @@ ApplicationWindow {
     header: ToolBar {
         id: toolBar
         height: 60
-        anchors.topMargin: 5
-        anchors.bottomMargin: 5
+
+        // Custom gradient background matching web design
+        background: Rectangle {
+            color: "#DED1C6"
+
+            // Bottom border
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: "#FFFFFF"
+                opacity: 0.3
+            }
+        }
 
         RowLayout {
-            spacing: 10
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
+            spacing: 24
+            anchors.leftMargin: 32
+            anchors.rightMargin: 32
             anchors.fill: parent
 
-            // Back button (left side)
-            NavigableToolButton {
-                // Only make the button visible if the user has navigated somewhere.
-                visible: stackView.depth > 1
+            // Left section: Back button + Logo
+            Row {
+                spacing: 16
 
-                iconSource: "qrc:/res/arrow_left.svg"
+                // Back button
+                NavigableToolButton {
+                    visible: stackView.depth > 1
+                    iconSource: "qrc:/res/arrow_left.svg"
 
-                onClicked: goBack()
+                    onClicked: goBack()
 
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                    Keys.onDownPressed: {
+                        stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                    }
+                }
+
+                // Logo/Brand
+                Label {
+                    id: logoLabel
+                    text: "AirPC"
+                    font.pixelSize: 24
+                    font.weight: Font.DemiBold
+                    color: "#8A1C5C"
+                    verticalAlignment: Qt.AlignVCenter
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (AirPCApiClient.isLoggedIn) {
+                                App.Router.push("games")
+                            }
+                        }
+                    }
                 }
             }
 
-            // Title label (center, takes remaining space)
-            Label {
-                id: titleLabel
-                text: stackView.currentItem.objectName
-                font.pointSize: 20
-                elide: Label.ElideRight
-                horizontalAlignment: Qt.AlignHCenter
-                verticalAlignment: Qt.AlignVCenter
+            // Spacer
+            Item {
                 Layout.fillWidth: true
             }
 
-            // Navigation buttons (right side, visible only when logged in)
+            // Navigation buttons (visible only when logged in)
             Row {
                 visible: AirPCApiClient.isLoggedIn
-                spacing: 5
+                spacing: 8
 
                 NavButton {
                     route: "games"
@@ -309,26 +339,79 @@ ApplicationWindow {
                 }
             }
 
-            // User section (far right, visible only when logged in)
+            // User section separator and content (visible only when logged in)
+            Rectangle {
+                visible: AirPCApiClient.isLoggedIn
+                width: 1.5
+                height: 28
+                color: Qt.rgba(69/255, 69/255, 69/255, 0.15)
+                Layout.alignment: Qt.AlignVCenter
+            }
+
             Row {
                 visible: AirPCApiClient.isLoggedIn
-                spacing: 10
+                spacing: 16
+                Layout.alignment: Qt.AlignVCenter
 
+                // Username link
                 Label {
+                    id: usernameLabel
                     text: AirPCApiClient.username
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    color: "#8A1C5C"
                     verticalAlignment: Qt.AlignVCenter
                     anchors.verticalCenter: parent.verticalCenter
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        hoverEnabled: true
+                        onClicked: App.Router.push("profile")
+                        onEntered: usernameLabel.opacity = 0.7
+                        onExited: usernameLabel.opacity = 1.0
+                    }
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: 150 }
+                    }
                 }
 
-                NavigableToolButton {
-                    iconSource: "qrc:/res/logout.svg"
+                // Logout button
+                Button {
+                    id: logoutButton
+                    text: qsTr("Logout")
+                    flat: true
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    contentItem: Text {
+                        text: logoutButton.text
+                        font.pixelSize: 14
+                        font.weight: Font.Medium
+                        color: logoutButton.hovered ? "#d63636" : "#F94141"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+
+                        Behavior on color {
+                            ColorAnimation { duration: 150 }
+                        }
+                    }
+
+                    background: Rectangle {
+                        radius: 12
+                        color: logoutButton.hovered ? Qt.rgba(249/255, 65/255, 65/255, 0.1) : "transparent"
+
+                        Behavior on color {
+                            ColorAnimation { duration: 150 }
+                        }
+                    }
+
+                    onClicked: AirPCApiClient.logout()
 
                     ToolTip.delay: 1000
                     ToolTip.timeout: 3000
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Logout")
-
-                    onClicked: AirPCApiClient.logout()
 
                     Keys.onDownPressed: {
                         stackView.currentItem.forceActiveFocus(Qt.TabFocus)
