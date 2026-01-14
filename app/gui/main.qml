@@ -252,23 +252,13 @@ ApplicationWindow {
         anchors.topMargin: 5
         anchors.bottomMargin: 5
 
-        Label {
-            id: titleLabel
-            visible: toolBar.width > 700
-            anchors.fill: parent
-            text: stackView.currentItem.objectName
-            font.pointSize: 20
-            elide: Label.ElideRight
-            horizontalAlignment: Qt.AlignHCenter
-            verticalAlignment: Qt.AlignVCenter
-        }
-
         RowLayout {
             spacing: 10
             anchors.leftMargin: 10
             anchors.rightMargin: 10
             anchors.fill: parent
 
+            // Back button (left side)
             NavigableToolButton {
                 // Only make the button visible if the user has navigated somewhere.
                 visible: stackView.depth > 1
@@ -282,76 +272,71 @@ ApplicationWindow {
                 }
             }
 
-            // This label will appear when the window gets too small and
-            // we need to ensure the toolbar controls don't collide
+            // Title label (center, takes remaining space)
             Label {
-                id: titleRowLabel
-                font.pointSize: titleLabel.font.pointSize
+                id: titleLabel
+                text: stackView.currentItem.objectName
+                font.pointSize: 20
                 elide: Label.ElideRight
                 horizontalAlignment: Qt.AlignHCenter
                 verticalAlignment: Qt.AlignVCenter
                 Layout.fillWidth: true
-
-                // We need this label to always be visible so it can occupy
-                // the remaining space in the RowLayout. To "hide" it, we
-                // just set the text to empty string.
-                text: !titleLabel.visible ? stackView.currentItem.objectName : ""
             }
 
-            Label {
-                id: versionLabel
-                visible: qmltypeof(stackView.currentItem, "SettingsView")
-                text: qsTr("Version %1").arg(SystemProperties.versionString)
-                font.pointSize: 12
-                horizontalAlignment: Qt.AlignRight
-                verticalAlignment: Qt.AlignVCenter
-            }
+            // Navigation buttons (right side, visible only when logged in)
+            Row {
+                visible: AirPCApiClient.isLoggedIn
+                spacing: 5
 
-            NavigableToolButton {
-                id: discordButton
-                visible: false // Temporarily disabled for Artemis
+                NavButton {
+                    route: "games"
+                    label: qsTr("Games")
+                }
 
-                iconSource: "qrc:/res/discord.svg"
+                NavButton {
+                    route: "profile"
+                    label: qsTr("Profile")
+                }
 
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Join our community on Discord")
+                NavButton {
+                    route: "settings"
+                    label: qsTr("Settings")
+                }
 
-                // TODO need to make sure browser is brought to foreground.
-                onClicked: Qt.openUrlExternally("https://moonlight-stream.org/discord");
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                NavButton {
+                    route: "playtime"
+                    label: qsTr("Playtime")
                 }
             }
 
-            NavigableToolButton {
-                id: addPcButton
-                visible: qmltypeof(stackView.currentItem, "PcView")
+            // User section (far right, visible only when logged in)
+            Row {
+                visible: AirPCApiClient.isLoggedIn
+                spacing: 10
 
-                iconSource:  "qrc:/res/ic_add_to_queue_white_48px.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Add PC manually") + (newPcShortcut.nativeText ? (" ("+newPcShortcut.nativeText+")") : "")
-
-                Shortcut {
-                    id: newPcShortcut
-                    sequence: StandardKey.New
-                    onActivated: addPcButton.clicked()
+                Label {
+                    text: AirPCApiClient.username
+                    verticalAlignment: Qt.AlignVCenter
+                    anchors.verticalCenter: parent.verticalCenter
                 }
 
-                onClicked: {
-                    addPcDialog.open()
-                }
+                NavigableToolButton {
+                    iconSource: "qrc:/res/logout.svg"
 
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 3000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Logout")
+
+                    onClicked: AirPCApiClient.logout()
+
+                    Keys.onDownPressed: {
+                        stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                    }
                 }
             }
 
+            // Update button (visible when update is available)
             NavigableToolButton {
                 property string browserUrl: ""
 
@@ -390,6 +375,7 @@ ApplicationWindow {
                 }
             }
 
+            // Help button (always visible)
             NavigableToolButton {
                 id: helpButton
                 visible: SystemProperties.hasBrowser
@@ -415,28 +401,12 @@ ApplicationWindow {
                 }
             }
 
-            NavigableToolButton {
-                // TODO: Implement gamepad mapping then unhide this button
-                visible: false
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Gamepad Mapper")
-
-                iconSource: "qrc:/res/ic_videogame_asset_white_48px.svg"
-
-                onClicked: navigateTo("qrc:/gui/GamepadMapper.qml", "GamepadMapper")
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
+            // Settings button (fallback, visible only when NOT logged in)
             NavigableToolButton {
                 id: settingsButton
+                visible: !AirPCApiClient.isLoggedIn
 
-                iconSource:  "qrc:/res/settings.svg"
+                iconSource: "qrc:/res/settings.svg"
 
                 onClicked: navigateTo("qrc:/gui/SettingsView.qml", "SettingsView")
 
