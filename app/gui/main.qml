@@ -107,7 +107,13 @@ ApplicationWindow {
             // Perform our early initialization before constructing
             // the initial view and pushing it to the StackView
             doEarlyInit()
-            push(initialView)
+            
+            // If the initial view is the standard PcView, show the login screen first
+            if (initialView === "qrc:/gui/PcView.qml") {
+                push("qrc:/gui/AirPCLoginView.qml")
+            } else {
+                push(initialView)
+            }
         }
 
         onCurrentItemChanged: {

@@ -199,6 +199,18 @@ public:
 
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
+
+    // API-based session token methods (alternative to certificate auth)
+    void setSessionToken(const QString& token);
+    void setGoApiBaseUrl(const QString& url);
+    void setDeviceId(const QString& id);
+    bool isApiSession() const { return !m_sessionToken.isEmpty(); }
+    QString sessionToken() const { return m_sessionToken; }
+    QString goApiBaseUrl() const { return m_goApiBaseUrl; }
+    
+    // Mint a short-lived host_control_token for Sunshine/Apollo control endpoints
+    QString mintHostControlToken(const QString& scope);
+
 private:
     void
     handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
@@ -213,4 +225,9 @@ private:
     NvAddress m_Address;
     QNetworkAccessManager m_Nam;
     QSslCertificate m_ServerCert;
+
+    // API-based session token (alternative to certificate auth)
+    QString m_sessionToken;
+    QString m_goApiBaseUrl;
+    QString m_deviceId;
 };

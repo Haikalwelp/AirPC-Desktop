@@ -217,7 +217,10 @@ SOURCES += \
     backend/quickmenumanager.cpp \
     backend/otppairingmanager.cpp \
     settings/artemissettings.cpp \
-    wm.cpp
+    wm.cpp \
+    backend/airpcapiclient.cpp \
+    backend/airpcstreambridge.cpp \
+    gui/airpcgamemodel.cpp
 
 HEADERS += \
     SDL_compat.h \
@@ -259,7 +262,10 @@ HEADERS += \
     backend/serverpermissions.h \
     backend/quickmenumanager.h \
     backend/otppairingmanager.h \
-    settings/artemissettings.h
+    settings/artemissettings.h \
+    backend/airpcapiclient.h \
+    backend/airpcstreambridge.h \
+    gui/airpcgamemodel.h
 
 # Platform-specific renderers and decoders
 ffmpeg {
@@ -518,12 +524,7 @@ else:unix: LIBS += -L$$OUT_PWD/../moonlight-common-c/ -lmoonlight-common-c
 INCLUDEPATH += $$PWD/../moonlight-common-c/moonlight-common-c/src
 DEPENDPATH += $$PWD/../moonlight-common-c/moonlight-common-c/src
 
-win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/release/ -lqmdnsengine
-else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/debug/ -lqmdnsengine
-else:unix: LIBS += -L$$OUT_PWD/../qmdnsengine/ -lqmdnsengine
 
-INCLUDEPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
-DEPENDPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
 
 soundio {
     win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../soundio/release/ -lsoundio

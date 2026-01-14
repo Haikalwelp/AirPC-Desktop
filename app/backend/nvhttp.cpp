@@ -12,11 +12,16 @@
 #include <QTimer>
 #include <QXmlStreamReader>
 #include <QSslKey>
+#include <QSslSocket>
+#include <QSslConfiguration>
 #include <QImageReader>
 #include <QtEndian>
 #include <QNetworkProxy>
 #include <QSysInfo>
 #include <QRandomGenerator>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QUrlQuery>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -43,7 +48,18 @@ NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert
 NvHTTP::NvHTTP(NvComputer* computer) :
     NvHTTP(computer->activeAddress, computer->activeHttpsPort, computer->serverCert)
 {
-
+    // If this computer was created from an API session, propagate the session token
+    // so all HTTPS requests can authenticate without pairing certificates.
+    if (computer != nullptr && computer->isApiSession && !computer->sessionToken.isEmpty()) {
+        setSessionToken(computer->sessionToken);
+        // Also propagate Go API URL and device ID for host token minting
+        if (!computer->goApiBaseUrl.isEmpty()) {
+            setGoApiBaseUrl(computer->goApiBaseUrl);
+        }
+        if (!computer->deviceId.isEmpty()) {
+            setDeviceId(computer->deviceId);
+        }
+    }
 }
 
 void NvHTTP::setServerCert(QSslCertificate serverCert)
@@ -86,6 +102,114 @@ uint16_t NvHTTP::httpPort()
 uint16_t NvHTTP::httpsPort()
 {
     return m_BaseUrlHttps.port();
+}
+
+void NvHTTP::setSessionToken(const QString& token)
+{
+    m_sessionToken = token;
+    qInfo() << "NvHTTP: Session token set (length:" << token.length() << ")";
+}
+
+void NvHTTP::setGoApiBaseUrl(const QString& url)
+{
+    m_goApiBaseUrl = url;
+    qInfo() << "NvHTTP: Go API base URL set to" << url;
+}
+
+void NvHTTP::setDeviceId(const QString& id)
+{
+    m_deviceId = id;
+    qInfo() << "NvHTTP: Device ID set to" << id;
+}
+
+QString NvHTTP::mintHostControlToken(const QString& scope)
+{
+    // Mint a short-lived host_control_token for Sunshine/Apollo control endpoints
+    // like /launch, /resume, /cancel_session (mirroring Android's NvHTTP.mintHostControlToken)
+    
+    if (m_sessionToken.isEmpty()) {
+        qWarning() << "NvHTTP: Cannot mint host token - no session token";
+        return QString();
+    }
+    if (m_goApiBaseUrl.isEmpty()) {
+        qWarning() << "NvHTTP: Cannot mint host token - no Go API URL";
+        return QString();
+    }
+    
+    qInfo() << "NvHTTP: Minting host_control_token for scope:" << scope;
+    
+    // Build the URL
+    QUrl url(m_goApiBaseUrl + "/api/v1/sessions/host-token");
+    
+    // Build JSON request body
+    QJsonObject body;
+    body["scope"] = scope;
+    body["device_id"] = m_deviceId.isEmpty() ? QSysInfo::machineHostName() : m_deviceId;
+    
+    QNetworkRequest request(url);
+    request.setRawHeader("X-Session-Token", m_sessionToken.toUtf8());
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    
+    // Use default SSL config (no client cert needed for Go API)
+    request.setSslConfiguration(QSslConfiguration::defaultConfiguration());
+    
+    QNetworkReply* reply = m_Nam.post(request, QJsonDocument(body).toJson());
+    
+    // Wait for response with timeout
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(REQUEST_TIMEOUT_MS, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    
+    if (!reply->isFinished()) {
+        qWarning() << "NvHTTP: Host token minting timed out";
+        reply->abort();
+        delete reply;
+        return QString();
+    }
+    
+    if (reply->error() != QNetworkReply::NoError) {
+        int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QByteArray errorBody = reply->readAll();
+        qWarning() << "NvHTTP: Host token minting failed - HTTP" << httpStatus 
+                   << "Error:" << reply->errorString();
+        qWarning() << "NvHTTP: Response body:" << QString::fromUtf8(errorBody);
+        qWarning() << "NvHTTP: Request URL was:" << reply->url().toString();
+        delete reply;
+        return QString();
+    }
+    
+    int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    QByteArray responseData = reply->readAll();
+    qInfo() << "NvHTTP: Host token mint response - HTTP" << httpStatus 
+            << "Body length:" << responseData.length();
+    delete reply;
+    
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(responseData);
+    if (jsonDoc.isNull() || !jsonDoc.isObject()) {
+        qWarning() << "NvHTTP: Invalid JSON response from host-token endpoint";
+        qWarning() << "NvHTTP: Raw response:" << QString::fromUtf8(responseData);
+        return QString();
+    }
+    
+    QJsonObject json = jsonDoc.object();
+    if (!json["success"].toBool(false)) {
+        QString message = json["message"].toString("Unknown error");
+        qWarning() << "NvHTTP: Host token minting failed:" << message;
+        qWarning() << "NvHTTP: Full JSON response:" << QString::fromUtf8(responseData);
+        return QString();
+    }
+    
+    QString hostToken = json["host_control_token"].toString();
+    if (hostToken.isEmpty()) {
+        qWarning() << "NvHTTP: Empty host_control_token in response";
+        return QString();
+    }
+    
+    qInfo() << "NvHTTP: Host token minted successfully for scope:" << scope 
+            << "(token length:" << hostToken.length() << ")";
+    return hostToken;
 }
 
 QVector<int>
@@ -138,10 +262,11 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
     }
     QString deviceNameParam = "devicename=" + deviceName;
 
-    // Check if we have a pinned cert and HTTPS port for this host yet
-    if (!m_ServerCert.isNull() && httpsPort() != 0)
+    // Check if we have a pinned cert and HTTPS port for this host yet,
+    // or if we're using API-based session authentication
+    if ((!m_ServerCert.isNull() || isApiSession()) && httpsPort() != 0)
     {
-        // If we have a server cert, we must use HTTPS.
+        // If we have a server cert or session token, we must use HTTPS.
         serverInfo = openConnectionToString(m_BaseUrlHttps,
                                             "serverinfo",
                                             deviceNameParam,
@@ -175,7 +300,7 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
 
         // If we just needed to determine the HTTPS port, we'll try again over
         // HTTPS now that we have the port number
-        if (!m_ServerCert.isNull()) {
+        if (!m_ServerCert.isNull() || isApiSession()) {
             return getServerInfo(logLevel, fastFail);
         }
     }
@@ -274,6 +399,18 @@ NvHTTP::startApp(QString verb,
     // Add Limelight parameters
     allParams += LiGetLaunchUrlQueryParameters();
 
+    // For API sessions, mint a short-lived host_control_token before launch (like Android)
+    if (isApiSession() && !m_sessionToken.isEmpty() && !m_goApiBaseUrl.isEmpty()) {
+        qInfo() << "NvHTTP: Minting host_control_token for" << verb << "...";
+        QString mintedToken = mintHostControlToken(verb);
+        if (!mintedToken.isEmpty()) {
+            allParams += "&sessionToken=" + mintedToken;
+            qInfo() << "NvHTTP: Host token added to launch request";
+        } else {
+            qWarning() << "NvHTTP: Failed to mint host_control_token - launch may fail";
+        }
+    }
+
     QString response = openConnectionToString(m_BaseUrlHttps,
                                              verb,
                                              allParams,
@@ -290,11 +427,23 @@ NvHTTP::startApp(QString verb,
 void
 NvHTTP::quitApp()
 {
-    QString response =
-            openConnectionToString(m_BaseUrlHttps,
-                                   "cancel",
-                                   nullptr,
-                                   QUIT_TIMEOUT_MS);
+    QString response;
+    
+    // Use cancel_session with session token for API-based authentication (like Android)
+    if (isApiSession() && !m_sessionToken.isEmpty()) {
+        // For API sessions, use /cancel_session endpoint with session token as query param
+        // The X-Session-Token header is also added automatically in openConnection()
+        response = openConnectionToString(m_BaseUrlHttps,
+                                         "cancel_session",
+                                         "sessionToken=" + m_sessionToken,
+                                         QUIT_TIMEOUT_MS);
+    } else {
+        // Fall back to traditional /cancel for paired connections
+        response = openConnectionToString(m_BaseUrlHttps,
+                                         "cancel",
+                                         nullptr,
+                                         QUIT_TIMEOUT_MS);
+    }
 
     qInfo() << "Quit response:" << response;
 
@@ -497,8 +646,17 @@ void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& error
     bool ignoreErrors = true;
 
     if (m_ServerCert.isNull()) {
-        // We should never make an HTTPS request without a cert
-        Q_ASSERT(!m_ServerCert.isNull());
+        // For API-based sessions, we don't have a server certificate
+        // because authentication is handled via session token instead.
+        // In this case, we trust the connection since it comes from the API.
+        if (isApiSession()) {
+            qInfo() << "NvHTTP: Ignoring SSL errors for API-based session (session token auth)";
+            reply->ignoreSslErrors(errors);
+            return;
+        }
+        
+        // For traditional paired connections, we should never make HTTPS request without a cert
+        qWarning() << "NvHTTP: SSL error with no server certificate and no session token";
         return;
     }
 
@@ -582,8 +740,53 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     QNetworkRequest request(url);
 
-    // Add our client certificate
-    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    // API-session mode: dual-header authentication like Android
+    // X-Session-Token: minted host_control_token (short-lived, scoped for this request)
+    // X-AirPC-Session-Token: long-lived session token (for billing/tracking)
+    if (isApiSession() && !m_sessionToken.isEmpty()) {
+        // Always send the long-lived session token for billing
+        request.setRawHeader("X-AirPC-Session-Token", m_sessionToken.toUtf8());
+        
+        // Check if a minted host_control_token was passed via sessionToken query param
+        // Use manual parsing like Android's extractQueryParam to avoid URL encoding issues
+        QString mintedToken;
+        if (arguments != nullptr && arguments.contains("sessionToken=")) {
+            // Manual extraction matching Android's extractQueryParam behavior
+            QStringList parts = arguments.split('&');
+            for (const QString& part : parts) {
+                int idx = part.indexOf('=');
+                if (idx > 0 && part.left(idx) == "sessionToken") {
+                    mintedToken = part.mid(idx + 1);
+                    break;
+                }
+            }
+            qInfo() << "NvHTTP: Extracted minted token from query - length:" << mintedToken.length();
+            if (!mintedToken.isEmpty()) {
+                // Use the minted token for X-Session-Token (this is what the server validates)
+                request.setRawHeader("X-Session-Token", mintedToken.toUtf8());
+                qInfo() << "NvHTTP: Set X-Session-Token header with minted token (first 50 chars):" 
+                        << mintedToken.left(50) << "...";
+            } else {
+                // Fallback: use session token if no minted token
+                request.setRawHeader("X-Session-Token", m_sessionToken.toUtf8());
+                qWarning() << "NvHTTP: Minted token extraction failed, using session token fallback";
+            }
+        } else {
+            // No minted token, use session token directly
+            request.setRawHeader("X-Session-Token", m_sessionToken.toUtf8());
+            qInfo() << "NvHTTP: Using session token directly for X-Session-Token header";
+        }
+    }
+
+    // ALWAYS use client certificate for mTLS - the server requires it for TLS handshake.
+    // For API-session mode, we still provide the client cert but relax server cert validation
+    // (session token header provides authorization, client cert satisfies mTLS requirement).
+    QSslConfiguration sslConfig = IdentityManager::get()->getSslConfig();
+    if (isApiSession()) {
+        // For API sessions, trust any server cert since session token provides authorization
+        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+    }
+    request.setSslConfiguration(sslConfig);
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     // Disable HTTP/2 (GFE 3.22 doesn't like it) and Qt 6 enables it by default
@@ -632,7 +835,7 @@ NvHTTP::openConnection(QUrl baseUrl,
             qWarning() << command << "request failed with error:" << reply->error();
         }
 
-        if (reply->error() == QNetworkReply::SslHandshakeFailedError) {
+        if (reply->error() == QNetworkReply::SslHandshakeFailedError && !isApiSession()) {
             // This will trigger falling back to HTTP for the serverinfo query
             // then pairing again to get the updated certificate.
             GfeHttpResponseException exception(401, "Server certificate mismatch");

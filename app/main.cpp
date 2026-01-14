@@ -50,6 +50,8 @@
 #include "backend/clipboardmanager.h"
 #include "backend/servercommandmanager.h"
 #include "backend/quickmenumanager.h"
+#include "backend/airpcapiclient.h"
+#include "gui/airpcgamemodel.h"
 
 #if defined(Q_OS_WIN32)
 #define IS_UNSPECIFIED_HANDLE(x) ((x) == INVALID_HANDLE_VALUE || (x) == NULL)
@@ -743,6 +745,13 @@ int main(int argc, char *argv[])
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
                                                    return new QuickMenuManager();
                                                });
+    qmlRegisterSingletonType<AirPCApiClient>("AirPCApiClient", 1, 0,
+                                             "AirPCApiClient",
+                                             [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                 return AirPCApiClient::get();
+                                             });
+    qmlRegisterType<AirPCGameModel>("AirPCGameModel", 1, 0, "AirPCGameModel");
+    qmlRegisterType<AirPCGameSortFilterModel>("AirPCGameModel", 1, 0, "AirPCGameSortFilterModel");
 
     // Create the identity manager on the main thread
     IdentityManager::get();

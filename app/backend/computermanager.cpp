@@ -156,7 +156,6 @@ private:
 ComputerManager::ComputerManager(StreamingPreferences* prefs)
     : m_Prefs(prefs),
       m_PollingRef(0),
-      m_MdnsBrowser(nullptr),
       m_CompatFetcher(nullptr),
       m_NeedsDelayedFlush(false)
 {
@@ -213,17 +212,6 @@ ComputerManager::~ComputerManager()
     }
 
     QWriteLocker lock(&m_Lock);
-
-    // Delete machines that haven't been resolved yet
-    while (!m_PendingResolution.isEmpty()) {
-        MdnsPendingComputer* computer = m_PendingResolution.first();
-        delete computer;
-        m_PendingResolution.removeFirst();
-    }
-
-    // Delete the browser to stop discovery
-    delete m_MdnsBrowser;
-    m_MdnsBrowser = nullptr;
 
     // Interrupt polling
     for (ComputerPollingEntry* entry : m_PollEntries) {
@@ -317,66 +305,12 @@ void ComputerManager::saveHosts()
     m_DelayedFlushCondition.wakeOne();
 }
 
-QHostAddress ComputerManager::getBestGlobalAddressV6(QVector<QHostAddress> &addresses)
-{
-    for (const QHostAddress& address : addresses) {
-        if (address.protocol() == QAbstractSocket::IPv6Protocol) {
-            if (address.isInSubnet(QHostAddress("fe80::"), 10)) {
-                // Link-local
-                continue;
-            }
-
-            if (address.isInSubnet(QHostAddress("fec0::"), 10)) {
-                qInfo() << "Ignoring site-local address:" << address;
-                continue;
-            }
-
-            if (address.isInSubnet(QHostAddress("fc00::"), 7)) {
-                qInfo() << "Ignoring ULA:" << address;
-                continue;
-            }
-
-            if (address.isInSubnet(QHostAddress("2002::"), 16)) {
-                qInfo() << "Ignoring 6to4 address:" << address;
-                continue;
-            }
-
-            if (address.isInSubnet(QHostAddress("2001::"), 32)) {
-                qInfo() << "Ignoring Teredo address:" << address;
-                continue;
-            }
-
-            return address;
-        }
-    }
-
-    return QHostAddress();
-}
-
 void ComputerManager::startPolling()
 {
     QWriteLocker lock(&m_Lock);
 
     if (++m_PollingRef > 1) {
         return;
-    }
-
-    if (m_Prefs->enableMdns) {
-        // Start an MDNS query for GameStream hosts
-        m_MdnsServer.reset(new QMdnsEngine::Server());
-        m_MdnsBrowser = new QMdnsEngine::Browser(m_MdnsServer.data(), "_nvstream._tcp.local.");
-        connect(m_MdnsBrowser, &QMdnsEngine::Browser::serviceAdded,
-                this, [this](const QMdnsEngine::Service& service) {
-            qInfo() << "Discovered mDNS host:" << service.hostname();
-
-            MdnsPendingComputer* pendingComputer = new MdnsPendingComputer(m_MdnsServer, service);
-            connect(pendingComputer, &MdnsPendingComputer::resolvedHost,
-                    this, &ComputerManager::handleMdnsServiceResolved);
-            m_PendingResolution.append(pendingComputer);
-        });
-    }
-    else {
-        qWarning() << "mDNS is disabled by user preference";
     }
 
     // Start polling threads for each known host
@@ -410,44 +344,6 @@ void ComputerManager::startPollingComputer(NvComputer* computer)
         pollingEntry->setActiveThread(thread);
         thread->start();
     }
-}
-
-void ComputerManager::handleMdnsServiceResolved(MdnsPendingComputer* computer,
-                                                QVector<QHostAddress>& addresses)
-{
-    QHostAddress v6Global = getBestGlobalAddressV6(addresses);
-    bool added = false;
-
-    // Add the host using the IPv4 address
-    for (const QHostAddress& address : addresses) {
-        if (address.protocol() == QAbstractSocket::IPv4Protocol) {
-            // NB: We don't just call addNewHost() here with v6Global because the IPv6
-            // address may not be reachable (if the user hasn't installed the IPv6 helper yet
-            // or if this host lacks outbound IPv6 capability). We want to add IPv6 even if
-            // it's not currently reachable.
-            addNewHost(NvAddress(address, computer->port()), true, NvAddress(v6Global, computer->port()));
-            added = true;
-            break;
-        }
-    }
-
-    if (!added) {
-        // If we get here, there wasn't an IPv4 address so we'll do it v6-only
-        for (const QHostAddress& address : addresses) {
-            if (address.protocol() == QAbstractSocket::IPv6Protocol) {
-                // Use a link-local or site-local address for the "local address"
-                if (address.isInSubnet(QHostAddress("fe80::"), 10) ||
-                        address.isInSubnet(QHostAddress("fec0::"), 10) ||
-                        address.isInSubnet(QHostAddress("fc00::"), 7)) {
-                    addNewHost(NvAddress(address, computer->port()), true, NvAddress(v6Global, computer->port()));
-                    break;
-                }
-            }
-        }
-    }
-
-    m_PendingResolution.removeOne(computer);
-    computer->deleteLater();
 }
 
 void ComputerManager::saveHost(NvComputer *computer)
@@ -1181,18 +1077,6 @@ void ComputerManager::stopPollingAsync()
         return;
     }
 
-    // Delete machines that haven't been resolved yet
-    while (!m_PendingResolution.isEmpty()) {
-        MdnsPendingComputer* computer = m_PendingResolution.first();
-        computer->deleteLater();
-        m_PendingResolution.removeFirst();
-    }
-
-    // Delete the browser and server to stop discovery and refresh polling
-    delete m_MdnsBrowser;
-    m_MdnsBrowser = nullptr;
-    m_MdnsServer.reset();
-
     // Interrupt all threads, but don't wait for them to terminate
     for (ComputerPollingEntry* entry : m_PollEntries) {
         entry->interrupt();
@@ -1204,7 +1088,7 @@ void ComputerManager::addNewHostManually(QString address)
     QUrl url = QUrl::fromUserInput("art://" + address);
     if (url.isValid() && !url.host().isEmpty() && url.scheme() == "art") {
         // If there wasn't a port specified, use the default
-        addNewHost(NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT)), false);
+        addNewHost(NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT)));
     }
     else {
         emit computerAddCompleted(false, false);
@@ -1216,11 +1100,9 @@ class PendingAddTask : public QObject, public QRunnable
     Q_OBJECT
 
 public:
-    PendingAddTask(ComputerManager* computerManager, NvAddress address, NvAddress mdnsIpv6Address, bool mdns)
+    PendingAddTask(ComputerManager* computerManager, NvAddress address)
         : m_ComputerManager(computerManager),
           m_Address(address),
-          m_MdnsIpv6Address(mdnsIpv6Address),
-          m_Mdns(mdns),
           m_AboutToQuit(false)
     {
         connect(this, &PendingAddTask::computerAddCompleted,
@@ -1252,10 +1134,9 @@ private:
         }
 
         try {
-            // There's a race condition between GameStream servers reporting presence over
-            // mDNS and the HTTPS server being ready to respond to our queries. To work
-            // around this issue, we will issue the request again after a few seconds if
-            // we see a ServiceUnavailableError error.
+            // There's a race condition between servers starting up and being ready to respond
+            // to our queries. To work around this issue, we will issue the request again after
+            // a few seconds if we see a ServiceUnavailableError error.
             try {
                 serverInfo = http.getServerInfo(NvHTTP::NVLL_VERBOSE);
             } catch (const QtNetworkReplyException& e) {
@@ -1272,21 +1153,19 @@ private:
             }
             return serverInfo;
         } catch (...) {
-            if (!m_Mdns) {
-                unsigned int portTestResult;
+            unsigned int portTestResult;
 
-                if (m_ComputerManager->m_Prefs->detectNetworkBlocking) {
-                    // We failed to connect to the specified PC. Let's test to make sure this network
-                    // isn't blocking Moonlight, so we can tell the user about it.
-                    portTestResult = LiTestClientConnectivity("qt.conntest.moonlight-stream.org", 443,
-                                                              ML_PORT_FLAG_TCP_47984 | ML_PORT_FLAG_TCP_47989);
-                }
-                else {
-                    portTestResult = 0;
-                }
-
-                emit computerAddCompleted(false, portTestResult != 0 && portTestResult != ML_TEST_RESULT_INCONCLUSIVE);
+            if (m_ComputerManager->m_Prefs->detectNetworkBlocking) {
+                // We failed to connect to the specified PC. Let's test to make sure this network
+                // isn't blocking Moonlight, so we can tell the user about it.
+                portTestResult = LiTestClientConnectivity("qt.conntest.moonlight-stream.org", 443,
+                                                          ML_PORT_FLAG_TCP_47984 | ML_PORT_FLAG_TCP_47989);
             }
+            else {
+                portTestResult = 0;
+            }
+
+            emit computerAddCompleted(false, portTestResult != 0 && portTestResult != ML_TEST_RESULT_INCONCLUSIVE);
             return QString();
         }
     }
@@ -1295,15 +1174,10 @@ private:
     {
         NvHTTP http(m_Address, 0, QSslCertificate());
 
-        qInfo() << "Processing new PC at" << m_Address.toString() << "from" << (m_Mdns ? "mDNS" : "user") << "with IPv6 address" << m_MdnsIpv6Address.toString();
+        qInfo() << "Processing new PC at" << m_Address.toString();
 
         // Perform initial serverinfo fetch over HTTP since we don't know which cert to use
         QString serverInfo = fetchServerInfo(http);
-        if (serverInfo.isEmpty() && !m_MdnsIpv6Address.isNull()) {
-            // Retry using the global IPv6 address if the IPv4 or link-local IPv6 address fails
-            http.setAddress(m_MdnsIpv6Address);
-            serverInfo = fetchServerInfo(http);
-        }
         if (serverInfo.isEmpty()) {
             return;
         }
@@ -1334,35 +1208,8 @@ private:
             newComputer->update(httpsComputer);
         }
 
-        // Update addresses depending on the context
-        if (m_Mdns) {
-            // Only update local address if we actually reached the PC via this address.
-            // If we reached it via the IPv6 address after the local address failed,
-            // don't store the non-working local address.
-            if (http.address() == m_Address) {
-                newComputer->localAddress = m_Address;
-            }
-
-            // Get the WAN IP address using STUN if we're on mDNS over IPv4
-            if (QHostAddress(newComputer->localAddress.address()).protocol() == QAbstractSocket::IPv4Protocol) {
-                quint32 addr;
-                int err = LiFindExternalAddressIP4("stun.moonlight-stream.org", 3478, &addr);
-                if (err == 0) {
-                    newComputer->setRemoteAddress(QHostAddress(qFromBigEndian(addr)));
-                }
-                else {
-                    qWarning() << "STUN failed to get WAN address:" << err;
-                }
-            }
-
-            if (!m_MdnsIpv6Address.isNull()) {
-                Q_ASSERT(QHostAddress(m_MdnsIpv6Address.address()).protocol() == QAbstractSocket::IPv6Protocol);
-                newComputer->ipv6Address = m_MdnsIpv6Address;
-            }
-        }
-        else {
-            newComputer->manualAddress = m_Address;
-        }
+        // Store the manual address for manually added hosts
+        newComputer->manualAddress = m_Address;
 
         QHostAddress hostAddress(m_Address.address());
         bool addressIsSiteLocalV4 =
@@ -1397,10 +1244,8 @@ private:
                 // Drop the lock before notifying
                 m_ComputerManager->m_Lock.unlock();
 
-                // For non-mDNS clients, let them know it succeeded
-                if (!m_Mdns) {
-                    emit computerAddCompleted(true, false);
-                }
+                // Let the client know it succeeded
+                emit computerAddCompleted(true, false);
 
                 // Tell our client if something changed
                 if (changed) {
@@ -1418,9 +1263,9 @@ private:
                 // Drop the lock before notifying
                 m_ComputerManager->m_Lock.unlock();
 
-                // If this wasn't added via mDNS but it is a RFC 1918 IPv4 address and not a VPN,
+                // If it is a RFC 1918 IPv4 address and not a VPN,
                 // go ahead and do the STUN request now to populate an external address.
-                if (!m_Mdns && addressIsSiteLocalV4 && newComputer->getActiveAddressReachability() != NvComputer::RI_VPN) {
+                if (addressIsSiteLocalV4 && newComputer->getActiveAddressReachability() != NvComputer::RI_VPN) {
                     quint32 addr;
                     int err = LiFindExternalAddressIP4("stun.moonlight-stream.org", 3478, &addr);
                     if (err == 0) {
@@ -1431,10 +1276,8 @@ private:
                     }
                 }
 
-                // For non-mDNS clients, let them know it succeeded
-                if (!m_Mdns) {
-                    emit computerAddCompleted(true, false);
-                }
+                // Let the client know it succeeded
+                emit computerAddCompleted(true, false);
 
                 // Tell our client about this new PC
                 emit computerStateChanged(newComputer);
@@ -1444,16 +1287,14 @@ private:
 
     ComputerManager* m_ComputerManager;
     NvAddress m_Address;
-    NvAddress m_MdnsIpv6Address;
-    bool m_Mdns;
     bool m_AboutToQuit;
 };
 
-void ComputerManager::addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address)
+void ComputerManager::addNewHost(NvAddress address)
 {
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for serverinfo query to complete
-    PendingAddTask* addTask = new PendingAddTask(this, address, mdnsIpv6Address, mdns);
+    PendingAddTask* addTask = new PendingAddTask(this, address);
     QThreadPool::globalInstance()->start(addTask);
 }
 

@@ -116,16 +116,9 @@ CenteredGridView {
         spacing: 5
         visible: pcGrid.count === 0
 
-        BusyIndicator {
-            id: searchSpinner
-            visible: StreamingPreferences.enableMdns
-        }
-
         Label {
-            height: searchSpinner.height
             elide: Label.ElideRight
-            text: StreamingPreferences.enableMdns ? qsTr("Searching for compatible hosts on your local network...")
-                                                  : qsTr("Automatic PC discovery is disabled. Add your PC manually.")
+            text: qsTr("No PCs found. Add your PC manually.")
             font.pointSize: 20
             verticalAlignment: Text.AlignVCenter
             wrapMode: Text.Wrap

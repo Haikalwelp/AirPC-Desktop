@@ -118,6 +118,16 @@ public:
     // Remember to update isEqualSerialized() when adding fields here!
     QString apolloVersion;
 
+    // API-based session authentication (alternative to certificate pairing)
+    // These fields are session-specific and should NOT be serialized
+    bool isApiSession = false;
+    QString sessionToken;
+    QString sessionId;
+    QString allocationId;
+    int playtimeSeconds = 0;
+    QString goApiBaseUrl;  // API base URL for host token minting
+    QString deviceId;      // Device ID for host token minting
+
     // Synchronization
     mutable CopySafeReadWriteLock lock;
 

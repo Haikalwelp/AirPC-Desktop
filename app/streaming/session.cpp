@@ -1028,6 +1028,13 @@ bool Session::initialize()
     if (m_ServerCommandManager && m_QuickMenuManager && m_ClipboardManager) {
         // Set up the ServerCommandManager with the computer and HTTP client
         NvHTTP* httpClient = new NvHTTP(m_Computer);
+        
+        // Configure session token for API-based sessions
+        if (m_Computer->isApiSession && !m_Computer->sessionToken.isEmpty()) {
+            qInfo() << "Session: Using API-based session authentication for ServerCommandManager";
+            httpClient->setSessionToken(m_Computer->sessionToken);
+        }
+        
         m_ServerCommandManager->setConnection(m_Computer, httpClient);
         
         // Set up the ClipboardManager with the same HTTP client
@@ -1388,6 +1395,12 @@ private:
         // Perform a best-effort app quit
         if (shouldQuit) {
             NvHTTP http(m_Session->m_Computer);
+            
+            // Configure session token for API-based sessions
+            if (m_Session->m_Computer->isApiSession && !m_Session->m_Computer->sessionToken.isEmpty()) {
+                qInfo() << "Session: Using API-based session authentication for app quit";
+                http.setSessionToken(m_Session->m_Computer->sessionToken);
+            }
 
             // Logging is already done inside NvHTTP
             try {
@@ -1729,6 +1742,13 @@ bool Session::startConnectionAsync()
 
     try {
         NvHTTP http(m_Computer);
+        
+        // Configure session token for API-based sessions
+        if (m_Computer->isApiSession && !m_Computer->sessionToken.isEmpty()) {
+            qInfo() << "Session: Using API-based session authentication for app launch";
+            http.setSessionToken(m_Computer->sessionToken);
+        }
+        
         http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                       m_Computer->isNvidiaServerSoftware,
                       m_App.id, m_App.uuid, &m_StreamConfig,
