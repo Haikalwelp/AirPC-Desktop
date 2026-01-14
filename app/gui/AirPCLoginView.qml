@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Effects
 
 import AirPCApiClient 1.0
+import "." as App
 
 FocusScope {
     id: root
@@ -802,10 +803,8 @@ FocusScope {
             console.log("Login successful, navigating to game library...")
             root.loginRequested(usernameInput.text, passwordInput.text, rememberMeCheck.checked)
             root.loginSuccessful()
-            // Navigate to game library - use root's StackView attachment
-            if (root.StackView.view) {
-                root.StackView.view.replace("qrc:/gui/AirPCPublicGamesView.qml")
-            }
+            // Navigate to game library via Router
+            App.Router.onLoginSuccess()
         }
         
         function onLoginFailed(error) {
@@ -826,9 +825,7 @@ FocusScope {
     Component.onCompleted: {
         if (AirPCApiClient.isLoggedIn) {
             console.log("Already logged in, navigating to game library...")
-            if (root.StackView.view) {
-                root.StackView.view.replace("qrc:/gui/AirPCPublicGamesView.qml")
-            }
+            App.Router.onLoginSuccess()
         } else {
             // Auto-focus username field
             usernameInput.forceActiveFocus()
