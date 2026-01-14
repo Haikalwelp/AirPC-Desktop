@@ -27,6 +27,8 @@
         <file>gui/AirPCPublicGamesView.qml</file>
         <file>gui/Router.qml</file>
         <file>gui/NavButton.qml</file>
+        <file>gui/PlaytimeView.qml</file>
+        <file>gui/ProfileView.qml</file>
         <file>gui/qmldir</file>
     </qresource>
 </RCC>
