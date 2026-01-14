@@ -9,6 +9,8 @@ import AutoUpdateChecker 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import SdlGamepadKeyNavigation 1.0
+import AirPCApiClient 1.0
+import "." as App
 
 ApplicationWindow {
     property bool pollingActive: false
@@ -89,12 +91,11 @@ ApplicationWindow {
 
     function goBack() {
         if (clearOnBack) {
-            // Pop all items except the first one
             stackView.pop(null)
             clearOnBack = false
         }
         else {
-            stackView.pop()
+            App.Router.back()
         }
     }
 
@@ -104,16 +105,12 @@ ApplicationWindow {
         focus: true
 
         Component.onCompleted: {
-            // Perform our early initialization before constructing
-            // the initial view and pushing it to the StackView
+            // Perform our early initialization
             doEarlyInit()
-            
-            // If the initial view is the standard PcView, show the login screen first
-            if (initialView === "qrc:/gui/PcView.qml") {
-                push("qrc:/gui/AirPCLoginView.qml")
-            } else {
-                push(initialView)
-            }
+
+            // Initialize Router with StackView reference
+            App.Router.stackView = stackView
+            App.Router.init()
         }
 
         onCurrentItemChanged: {
@@ -150,6 +147,14 @@ ApplicationWindow {
         // when Menu is consumed by a focused control.
         Keys.onHangupPressed: {
             settingsButton.clicked()
+        }
+    }
+
+    // Router logout handler
+    Connections {
+        target: AirPCApiClient
+        function onLogoutCompleted() {
+            App.Router.onLogout()
         }
     }
 
