@@ -73,15 +73,8 @@ FocusScope {
             NumberAnimation { target: loginCard; property: "scale"; to: 1; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 1.02 }
         }
 
-        // Shadow using MultiEffect
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowColor: Qt.rgba(0, 0, 0, 0.18)
-            shadowVerticalOffset: 20
-            shadowHorizontalOffset: 0
-            shadowBlur: 0.6
-        }
+        // Shadow removed (flat login form)
+        layer.enabled: false
 
         // Content
         ColumnLayout {
@@ -693,17 +686,8 @@ FocusScope {
                     
                     Behavior on color { ColorAnimation { duration: 150 } }
                     
-                    layer.enabled: true
-                    layer.effect: MultiEffect {
-                        shadowEnabled: !loginBtn.pressed
-                        shadowColor: Qt.rgba(root.primaryColor.r, root.primaryColor.g, root.primaryColor.b, 0.35)
-                        shadowVerticalOffset: loginBtn.hovered ? 6 : 4
-                        shadowHorizontalOffset: 0
-                        shadowBlur: loginBtn.hovered ? 0.4 : 0.3
-                        
-                        Behavior on shadowVerticalOffset { NumberAnimation { duration: 150 } }
-                        Behavior on shadowBlur { NumberAnimation { duration: 150 } }
-                    }
+                    // Shadow removed (flat login form)
+                    layer.enabled: false
                     
                     // Press feedback
                     scale: loginBtn.pressed ? 0.98 : 1

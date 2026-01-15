@@ -25,6 +25,7 @@
         <file>gui/Toast.qml</file>
         <file>gui/AirPCLoginView.qml</file>
         <file>gui/AirPCPublicGamesView.qml</file>
+        <file>gui/AirPCShellView.qml</file>
         <file>gui/Router.qml</file>
         <file>gui/NavButton.qml</file>
         <file>gui/PlaytimeView.qml</file>

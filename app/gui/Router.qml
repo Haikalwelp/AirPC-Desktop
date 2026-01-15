@@ -15,10 +15,13 @@ QtObject {
     // Reference to the StackView, must be set from main.qml
     property var stackView: null
 
-    // Current route name (e.g., "login", "games", "settings")
+    // Current stack route ("login" | "shell" | "")
     property string currentRoute: ""
 
-    // Route saved when auth guard redirects to login
+    // Current active top-level tab
+    property string currentTab: "games"
+
+    // Tab saved when auth guard redirects to login
     property string pendingRoute: ""
 
     // Auth state bound to AirPCApiClient
@@ -34,38 +37,74 @@ QtObject {
             protected: false,
             objectName: "LoginView"
         },
-        "games": {
-            url: "qrc:/gui/AirPCPublicGamesView.qml",
+        "shell": {
+            url: "qrc:/gui/AirPCShellView.qml",
             protected: true,
-            objectName: "Game Library"
-        },
-        "settings": {
-            url: "qrc:/gui/SettingsView.qml",
-            protected: true,
-            objectName: "Settings"
-        },
-        "profile": {
-            url: "qrc:/gui/ProfileView.qml",
-            protected: true,
-            objectName: "Profile"
-        },
-        "playtime": {
-            url: "qrc:/gui/PlaytimeView.qml",
-            protected: true,
-            objectName: "Playtime"
+            objectName: "Shell"
         }
     })
+
+    readonly property var tabs: (["games", "profile", "settings", "playtime"])
 
     // ============================================================================
     // Navigation Functions
     // ============================================================================
 
+    function isTabRoute(routeName) {
+        return tabs.indexOf(routeName) !== -1
+    }
+
     /**
-     * Push a new route onto the stack.
-     * If the route is protected and user is not logged in, redirects to login.
-     * @param routeName - The name of the route to navigate to
+     * Switch between top-level pages via the navbar.
+     * This keeps tab pages alive and avoids growing StackView depth.
+     */
+    function switchTab(tabName) {
+        console.log("[Router] switchTab()", tabName)
+
+        if (!stackView) {
+            console.error("[Router] Error: stackView is not set")
+            return
+        }
+
+        if (!isTabRoute(tabName)) {
+            console.error("[Router] Error: Unknown tab:", tabName)
+            return
+        }
+
+        // Auth guard
+        if (!isLoggedIn) {
+            pendingRoute = tabName
+            navigateToRoute("login", stackView.depth > 0 ? "replace" : "push")
+            return
+        }
+
+        var shellConfig = routes["shell"]
+
+        // If Shell is already the current root view, just switch tabs.
+        if (stackView.currentItem && stackView.currentItem.objectName === shellConfig.objectName) {
+            stackView.currentItem.currentTab = tabName
+        } else {
+            // Put Shell at the root of the stack (replace login / any other root).
+            if (stackView.depth === 0) {
+                stackView.push(shellConfig.url, { "initialTab": tabName, "currentTab": tabName })
+            } else {
+                stackView.replace(shellConfig.url, { "initialTab": tabName, "currentTab": tabName })
+            }
+        }
+
+        currentRoute = "shell"
+        currentTab = tabName
+    }
+
+    /**
+     * Push a route onto the stack (used for non-tab, nested flows).
      */
     function push(routeName) {
+        if (isTabRoute(routeName)) {
+            switchTab(routeName)
+            return
+        }
+
         console.log("[Router] push() called with route:", routeName)
 
         if (!stackView) {
@@ -82,7 +121,7 @@ QtObject {
         // Auth guard check
         if (routeConfig.protected && !isLoggedIn) {
             console.log("[Router] Route is protected and user is not logged in, redirecting to login")
-            pendingRoute = routeName
+            pendingRoute = "games"
             navigateToRoute("login", "push")
             return
         }
@@ -91,11 +130,14 @@ QtObject {
     }
 
     /**
-     * Replace the current route with a new one.
-     * If the route is protected and user is not logged in, redirects to login.
-     * @param routeName - The name of the route to navigate to
+     * Replace the current route (used for login/logout transitions).
      */
     function replace(routeName) {
+        if (isTabRoute(routeName)) {
+            switchTab(routeName)
+            return
+        }
+
         console.log("[Router] replace() called with route:", routeName)
 
         if (!stackView) {
@@ -112,7 +154,7 @@ QtObject {
         // Auth guard check
         if (routeConfig.protected && !isLoggedIn) {
             console.log("[Router] Route is protected and user is not logged in, redirecting to login")
-            pendingRoute = routeName
+            pendingRoute = "games"
             navigateToRoute("login", "replace")
             return
         }
@@ -146,11 +188,11 @@ QtObject {
     function onLoginSuccess() {
         console.log("[Router] onLoginSuccess() called")
 
-        var targetRoute = pendingRoute !== "" ? pendingRoute : "games"
-        console.log("[Router] Navigating to:", targetRoute)
+        var targetTab = pendingRoute !== "" ? pendingRoute : "games"
+        console.log("[Router] Navigating to tab:", targetTab)
 
         pendingRoute = ""
-        replace(targetRoute)
+        switchTab(targetTab)
     }
 
     /**
@@ -188,35 +230,20 @@ QtObject {
             return
         }
 
-        var targetRoute = initialRoute
-
-        // Determine default route based on auth state
-        if (!targetRoute || targetRoute === "") {
-            targetRoute = isLoggedIn ? "games" : "login"
-            console.log("[Router] No initial route specified, defaulting to:", targetRoute)
+        // If a tab name is requested, switch to it.
+        if (initialRoute && initialRoute !== "" && isTabRoute(initialRoute)) {
+            switchTab(initialRoute)
+            return
         }
 
-        // Validate route exists
-        if (!routes[targetRoute]) {
-            console.error("[Router] Error: Unknown initial route:", targetRoute)
-            targetRoute = isLoggedIn ? "games" : "login"
-            console.log("[Router] Falling back to:", targetRoute)
+        // Default startup behavior
+        if (!isLoggedIn) {
+            navigateToRoute("login", "push")
+            return
         }
 
-        // Check auth guard for initial route
-        var routeConfig = routes[targetRoute]
-        if (routeConfig.protected && !isLoggedIn) {
-            console.log("[Router] Initial route is protected but user not logged in")
-            pendingRoute = targetRoute
-            targetRoute = "login"
-        }
-
-        // Navigate to initial route
-        routeConfig = routes[targetRoute]
-        stackView.push(routeConfig.url)
-        currentRoute = targetRoute
-
-        console.log("[Router] Initialized with route:", currentRoute)
+        // Logged in: start in Shell, default tab = games
+        switchTab("games")
     }
 
     /**
@@ -240,9 +267,8 @@ QtObject {
             }
         }
 
-        // No match found - might be a non-router managed view
+        // No match found - might be a nested/non-router view. Keep currentRoute/tab.
         console.log("[Router] No route match found for objectName:", currentObjectName)
-        currentRoute = ""
     }
 
     // ============================================================================

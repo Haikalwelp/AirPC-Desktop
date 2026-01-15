@@ -15,7 +15,7 @@ Button {
 
     property string route: ""
     property string label: ""
-    readonly property bool isActive: App.Router.currentRoute === route
+    readonly property bool isActive: App.Router.currentTab === route
 
     // Design constants (hardcoded for reliability)
     readonly property color primaryColor: "#8A1C5C"
@@ -93,7 +93,7 @@ Button {
 
     onClicked: {
         if (route !== "") {
-            App.Router.push(route)
+            App.Router.switchTab(route)
         }
     }
 

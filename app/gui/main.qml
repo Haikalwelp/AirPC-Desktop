@@ -301,7 +301,7 @@ ApplicationWindow {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             if (AirPCApiClient.isLoggedIn) {
-                                App.Router.push("games")
+                                App.Router.switchTab("games")
                             }
                         }
                     }
@@ -367,7 +367,7 @@ ApplicationWindow {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         hoverEnabled: true
-                        onClicked: App.Router.push("profile")
+                        onClicked: App.Router.switchTab("profile")
                         onEntered: usernameLabel.opacity = 0.7
                         onExited: usernameLabel.opacity = 1.0
                     }

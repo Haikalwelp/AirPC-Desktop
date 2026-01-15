@@ -24,5 +24,13 @@
         <file alias="gui/ServerCommands.qml">gui/ServerCommands.qml</file>
         <file alias="gui/QuickMenu.qml">gui/QuickMenu.qml</file>
         <file alias="gui/Toast.qml">gui/Toast.qml</file>
+        <file alias="gui/AirPCLoginView.qml">gui/AirPCLoginView.qml</file>
+        <file alias="gui/AirPCPublicGamesView.qml">gui/AirPCPublicGamesView.qml</file>
+        <file alias="gui/AirPCShellView.qml">gui/AirPCShellView.qml</file>
+        <file alias="gui/Router.qml">gui/Router.qml</file>
+        <file alias="gui/NavButton.qml">gui/NavButton.qml</file>
+        <file alias="gui/PlaytimeView.qml">gui/PlaytimeView.qml</file>
+        <file alias="gui/ProfileView.qml">gui/ProfileView.qml</file>
     </qresource>
 </RCC>
+
