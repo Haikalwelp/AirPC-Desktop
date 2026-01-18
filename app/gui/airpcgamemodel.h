@@ -36,7 +36,8 @@ public:
         HostnameRole,
         PortRole,
         ImageUrlRole,
-        HdrSupportedRole
+        HdrSupportedRole,
+        PlaytimeRole
     };
 
     explicit AirPCGameModel(QObject* parent = nullptr);

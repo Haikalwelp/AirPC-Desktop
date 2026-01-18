@@ -9,6 +9,7 @@ class NvComputer;
 class NvApp;
 class Session;
 class StreamingPreferences;
+class PlaytimeManager;
 
 /**
  * Bridge between AirPC API responses and the streaming Session.
@@ -31,6 +32,12 @@ public:
      * Get the singleton instance.
      */
     static AirPCStreamBridge* get();
+
+    /**
+     * Set the PlaytimeManager for session lifecycle integration.
+     * Call this after creating both objects.
+     */
+    void setPlaytimeManager(PlaytimeManager* manager);
 
     /**
      * Launch a stream from API response data.
@@ -113,6 +120,9 @@ private:
     Session* m_currentSession;
     NvComputer* m_syntheticComputer;
     QString m_currentAppName;
+    PlaytimeManager* m_playtimeManager = nullptr;
+    QString m_currentSessionToken;
+    int m_currentPlaytimeSeconds = 0;
 };
 
 #endif // AIRPCSTREAMBRIDGE_H

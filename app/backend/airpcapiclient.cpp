@@ -187,6 +187,50 @@ AirPCUserProfile AirPCUserProfile::fromJson(const QJsonObject& json)
 }
 
 // ============================================================================
+// AirPCHeartbeatResponse Implementation
+// ============================================================================
+
+AirPCHeartbeatResponse AirPCHeartbeatResponse::fromJson(const QJsonObject& json)
+{
+    AirPCHeartbeatResponse response;
+    response.valid = json["valid"].toBool(false);
+    response.remainingSeconds = json["remaining_seconds"].toInt(0);
+    response.remainingPlaytime = json["remaining_playtime"].toInt(0);
+    response.message = json["message"].toString();
+    response.idleWarning = json["idle_warning"].toBool(false);
+    response.idleSeconds = json["idle_seconds"].toInt(0);
+    return response;
+}
+
+// ============================================================================
+// AirPCClaimResponse Implementation
+// ============================================================================
+
+AirPCClaimResponse AirPCClaimResponse::fromJson(const QJsonObject& json)
+{
+    AirPCClaimResponse response;
+    response.success = json["success"].toBool(false);
+    response.playtimeGranted = json["playtime_granted"].toInt(0);
+    response.totalPlaytime = json["total_playtime"].toInt(0);
+    response.message = json["message"].toString();
+    return response;
+}
+
+// ============================================================================
+// AirPCOrderClaim Implementation
+// ============================================================================
+
+AirPCOrderClaim AirPCOrderClaim::fromJson(const QJsonObject& json)
+{
+    AirPCOrderClaim claim;
+    claim.claimId = json["claim_id"].toInt();
+    claim.orderSn = json["order_sn"].toString();
+    claim.playtimeGranted = json["playtime_granted"].toInt();
+    claim.claimedAt = json["claimed_at"].toString();
+    return claim;
+}
+
+// ============================================================================
 // AirPCApiClient Implementation
 // ============================================================================
 
@@ -765,8 +809,149 @@ void AirPCApiClient::fetchProfile()
         if (json["success"].toBool()) {
             AirPCUserProfile profile = AirPCUserProfile::fromJson(json);
             qInfo() << "AirPCApiClient: Profile loaded for" << profile.username;
-            emit profileLoaded(profile);
+            emit profileLoaded(profile.playtimeSeconds, profile.claimCount, profile.username, profile.email);
         }
+    });
+}
+
+// ============================================================================
+// Heartbeat
+// ============================================================================
+
+void AirPCApiClient::sendHeartbeat()
+{
+    if (!hasActiveSession()) {
+        qWarning() << "AirPCApiClient: Cannot send heartbeat - no active session";
+        emit heartbeatFailed("No active session");
+        return;
+    }
+
+    QUrl url(m_apiBaseUrl + "/api/v1/sessions/heartbeat");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("X-Session-Token", m_activeSession.sessionToken.toUtf8());
+    request.setTransferTimeout(CONNECTION_TIMEOUT_MS);
+
+    // Build heartbeat data
+    QJsonObject body;
+    body["device_id"] = getDeviceId();
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "AirPCApiClient: Heartbeat failed:" << reply->errorString();
+            emit heartbeatFailed(reply->errorString());
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        AirPCHeartbeatResponse resp = AirPCHeartbeatResponse::fromJson(doc.object());
+
+        qDebug() << "AirPCApiClient: Heartbeat received - valid:" << resp.valid
+                 << "remaining:" << resp.remainingSeconds << "s"
+                 << "idleWarning:" << resp.idleWarning;
+
+        emit heartbeatReceived(resp.valid, resp.remainingSeconds, resp.remainingPlaytime,
+                               resp.idleWarning, resp.idleSeconds, resp.message);
+    });
+}
+
+// ============================================================================
+// Claims
+// ============================================================================
+
+void AirPCApiClient::claimOrder(const QString& orderSn)
+{
+    if (!isLoggedIn()) {
+        emit claimFailed("Not logged in");
+        return;
+    }
+
+    qInfo() << "AirPCApiClient: Claiming order" << orderSn;
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/claims");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject body;
+    body["order_sn"] = orderSn;
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QString error = reply->errorString();
+            QByteArray data = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isObject() && doc.object().contains("message")) {
+                error = doc.object()["message"].toString();
+            }
+            qWarning() << "AirPCApiClient: Claim failed:" << error;
+            emit claimFailed(error);
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        AirPCClaimResponse resp = AirPCClaimResponse::fromJson(doc.object());
+
+        if (!resp.success) {
+            qWarning() << "AirPCApiClient: Claim rejected:" << resp.message;
+            emit claimFailed(resp.message);
+            return;
+        }
+
+        qInfo() << "AirPCApiClient: Claim successful - granted:" << resp.playtimeGranted
+                << "total:" << resp.totalPlaytime;
+        emit claimSucceeded(resp.playtimeGranted, resp.totalPlaytime);
+    });
+}
+
+void AirPCApiClient::fetchClaimHistory()
+{
+    if (!isLoggedIn()) {
+        emit claimHistoryReceived(QVariantList());
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/claims");
+    QNetworkReply* reply = m_nam.get(request);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        QVariantList claimsList;
+
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "AirPCApiClient: Failed to fetch claim history:" << reply->errorString();
+            emit claimHistoryReceived(claimsList);
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject json = doc.object();
+
+        if (json["success"].toBool()) {
+            QJsonArray claimsArray = json["claims"].toArray();
+            for (const QJsonValue& val : claimsArray) {
+                AirPCOrderClaim claim = AirPCOrderClaim::fromJson(val.toObject());
+                QVariantMap claimMap;
+                claimMap["claimId"] = claim.claimId;
+                claimMap["orderSn"] = claim.orderSn;
+                claimMap["playtimeGranted"] = claim.playtimeGranted;
+                claimMap["claimedAt"] = claim.claimedAt;
+                claimsList.append(claimMap);
+            }
+            qInfo() << "AirPCApiClient: Loaded" << claimsList.size() << "claim history entries";
+        }
+
+        emit claimHistoryReceived(claimsList);
     });
 }
 

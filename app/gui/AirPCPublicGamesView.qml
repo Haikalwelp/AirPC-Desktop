@@ -6,6 +6,7 @@ import QtQuick.Effects
 import AirPCGameModel 1.0
 import AirPCApiClient 1.0
 import Session 1.0
+import PlaytimeManager 1.0
 
 Item {
     id: root
@@ -319,7 +320,7 @@ Item {
                 spacing: 4
 
                 Text {
-                    text: sessionCard.session ? sessionCard.session.appName : ""
+                    text: sessionCard.session ? (sessionCard.session.appName) : ""
                     font.pixelSize: 16
                     font.weight: Font.Bold
                     font.family: "Montserrat"
@@ -327,12 +328,26 @@ Item {
                     elide: Text.ElideRight
                 }
 
-                Text {
-                    text: sessionCard.session ? ("On " + sessionCard.session.computerName) : ""
-                    font.pixelSize: 12
-                    font.family: "Montserrat"
-                    color: root.textMutedOnDark
-                    elide: Text.ElideRight
+                RowLayout {
+                    spacing: 12
+
+                    Text {
+                        text: sessionCard.session ? ("On " + sessionCard.session.computerName) : ""
+                        font.pixelSize: 12
+                        font.family: "Montserrat"
+                        color: root.textMutedOnDark
+                        elide: Text.ElideRight
+                    }
+
+                    // Session remaining time
+                    Text {
+                        visible: PlaytimeManager.isSessionActive
+                        text: "Time: " + PlaytimeManager.formattedRemaining
+                        color: PlaytimeManager.remainingSeconds < 300 ? "#ef4444" : "#22c55e"
+                        font.pixelSize: 12
+                        font.weight: Font.Bold
+                        font.family: "Montserrat"
+                    }
                 }
             }
 

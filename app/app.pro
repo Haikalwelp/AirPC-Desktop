@@ -220,7 +220,9 @@ SOURCES += \
     wm.cpp \
     backend/airpcapiclient.cpp \
     backend/airpcstreambridge.cpp \
-    gui/airpcgamemodel.cpp
+    gui/airpcgamemodel.cpp \
+    backend/playtimetracker.cpp \
+    backend/playtimemanager.cpp
 
 HEADERS += \
     SDL_compat.h \
@@ -265,7 +267,9 @@ HEADERS += \
     settings/artemissettings.h \
     backend/airpcapiclient.h \
     backend/airpcstreambridge.h \
-    gui/airpcgamemodel.h
+    gui/airpcgamemodel.h \
+    backend/playtimetracker.h \
+    backend/playtimemanager.h
 
 # Platform-specific renderers and decoders
 ffmpeg {

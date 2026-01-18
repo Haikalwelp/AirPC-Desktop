@@ -62,6 +62,8 @@ QVariant AirPCGameModel::data(const QModelIndex& index, int role) const
         return game.getImageUrl(m_api->authToken(), m_api->apiBaseUrl());
     case HdrSupportedRole:
         return game.hdrSupported;
+    case PlaytimeRole:
+        return game.playtimeSeconds;
     default:
         return QVariant();
     }
@@ -79,6 +81,7 @@ QHash<int, QByteArray> AirPCGameModel::roleNames() const
     roles[PortRole] = "port";
     roles[ImageUrlRole] = "imageUrl";
     roles[HdrSupportedRole] = "hdrSupported";
+    roles[PlaytimeRole] = "playtimeSeconds";
     return roles;
 }
 

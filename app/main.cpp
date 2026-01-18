@@ -51,6 +51,8 @@
 #include "backend/servercommandmanager.h"
 #include "backend/quickmenumanager.h"
 #include "backend/airpcapiclient.h"
+#include "backend/playtimemanager.h"
+#include "backend/airpcstreambridge.h"
 #include "gui/airpcgamemodel.h"
 
 #if defined(Q_OS_WIN32)
@@ -750,6 +752,15 @@ int main(int argc, char *argv[])
                                              [](QQmlEngine*, QJSEngine*) -> QObject* {
                                                  return AirPCApiClient::get();
                                              });
+    qmlRegisterSingletonType<PlaytimeManager>("PlaytimeManager", 1, 0,
+                                              "PlaytimeManager",
+                                              [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                  // Create PlaytimeManager with AirPCApiClient
+                                                  static PlaytimeManager* manager = new PlaytimeManager(AirPCApiClient::get());
+                                                  // Wire up with AirPCStreamBridge for session lifecycle
+                                                  AirPCStreamBridge::get()->setPlaytimeManager(manager);
+                                                  return manager;
+                                              });
     qmlRegisterType<AirPCGameModel>("AirPCGameModel", 1, 0, "AirPCGameModel");
     qmlRegisterType<AirPCGameSortFilterModel>("AirPCGameModel", 1, 0, "AirPCGameSortFilterModel");
 

@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QString>
 #include <QList>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QJsonObject>
@@ -55,6 +57,7 @@ public:
     QString computerUuid;
     QString hostname;
     int port = 47989;
+    int playtimeSeconds = 0;  // Per-app playtime (if available)
 
     static AirPCPublicApp fromJson(const QJsonObject& json, const AirPCAllocation& allocation);
     QString getImageUrl(const QString& authToken, const QString& apiBaseUrl) const;
@@ -144,6 +147,50 @@ public:
 };
 Q_DECLARE_METATYPE(AirPCUserProfile)
 
+/**
+ * Heartbeat response from /api/v1/sessions/heartbeat
+ */
+class AirPCHeartbeatResponse {
+public:
+    bool valid = false;
+    int remainingSeconds = 0;      // Session time remaining
+    int remainingPlaytime = 0;     // Account balance
+    QString message;
+    bool idleWarning = false;
+    int idleSeconds = 0;
+
+    static AirPCHeartbeatResponse fromJson(const QJsonObject& json);
+};
+Q_DECLARE_METATYPE(AirPCHeartbeatResponse)
+
+/**
+ * Response from POST /api/v1/claims
+ */
+class AirPCClaimResponse {
+public:
+    bool success = false;
+    int playtimeGranted = 0;    // Seconds added (typically 7200 = 2 hours)
+    int totalPlaytime = 0;      // New balance
+    QString message;
+
+    static AirPCClaimResponse fromJson(const QJsonObject& json);
+};
+Q_DECLARE_METATYPE(AirPCClaimResponse)
+
+/**
+ * Single claim history item
+ */
+class AirPCOrderClaim {
+public:
+    int claimId = 0;
+    QString orderSn;
+    int playtimeGranted = 0;
+    QString claimedAt;
+
+    static AirPCOrderClaim fromJson(const QJsonObject& json);
+};
+Q_DECLARE_METATYPE(AirPCOrderClaim)
+
 // ============================================================================
 // AirPC API Client
 // ============================================================================
@@ -207,6 +254,14 @@ public:
     // Profile
     Q_INVOKABLE void fetchProfile();
 
+    // Heartbeat
+    Q_INVOKABLE void sendHeartbeat();
+    QString sessionToken() const { return m_activeSession.sessionToken; }
+
+    // Claims
+    Q_INVOKABLE void claimOrder(const QString& orderSn);
+    Q_INVOKABLE void fetchClaimHistory();
+
     // Configuration
     QString apiBaseUrl() const { return m_apiBaseUrl; }
     void setApiBaseUrl(const QString& url);
@@ -225,13 +280,25 @@ signals:
     void allocationsLoaded(const QList<AirPCAllocation>& allocations);
     void appsLoaded(const QList<AirPCPublicApp>& apps);
     void appsLoadProgress(int loaded, int total);
-    void profileLoaded(const AirPCUserProfile& profile);
+    // Profile signal with individual values for QML compatibility
+    void profileLoaded(int playtimeSeconds, int claimCount, const QString& username, const QString& email);
 
     // Stream signals
     void streamLaunched(const AirPCStreamLaunchResponse& response);
     void streamLaunchFailed(const QString& error);
     void sessionEnded();
     void activeSessionChanged();
+
+    // Heartbeat signals
+    void heartbeatReceived(bool valid, int remainingSeconds, int remainingPlaytime, 
+                           bool idleWarning, int idleSeconds, const QString& message);
+    void heartbeatFailed(const QString& error);
+
+    // Claim signals  
+    void claimSucceeded(int playtimeGranted, int totalPlaytime);
+    void claimFailed(const QString& error);
+    // Claim history as QVariantList for QML compatibility
+    void claimHistoryReceived(const QVariantList& claims);
 
 private:
     explicit AirPCApiClient(QObject* parent = nullptr);

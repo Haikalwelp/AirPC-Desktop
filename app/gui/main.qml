@@ -10,6 +10,7 @@ import StreamingPreferences 1.0
 import SystemProperties 1.0
 import SdlGamepadKeyNavigation 1.0
 import AirPCApiClient 1.0
+import PlaytimeManager 1.0
 import "." as App
 
 ApplicationWindow {
@@ -617,6 +618,86 @@ ApplicationWindow {
                     addPcDialog.accept()
                 }
             }
+        }
+    }
+
+    // Playtime warning toast notification
+    Rectangle {
+        id: playtimeToast
+        width: Math.min(400, parent.width - 40)
+        height: playtimeToastText.implicitHeight + 32
+        anchors.bottom: parent.bottom
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottomMargin: 100
+        radius: 24
+        color: "#1a1a2e"
+        border.color: "#ef4444"
+        border.width: 2
+        opacity: 0
+        visible: opacity > 0
+        z: 1000
+
+        Text {
+            id: playtimeToastText
+            anchors.centerIn: parent
+            anchors.margins: 16
+            width: parent.width - 32
+            color: "#FFFFFF"
+            font.pixelSize: 14
+            font.weight: Font.Medium
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        PropertyAnimation {
+            id: playtimeToastShowAnim
+            target: playtimeToast
+            property: "opacity"
+            from: 0
+            to: 1
+            duration: 300
+            easing.type: Easing.OutQuad
+        }
+
+        PropertyAnimation {
+            id: playtimeToastHideAnim
+            target: playtimeToast
+            property: "opacity"
+            from: 1
+            to: 0
+            duration: 300
+            easing.type: Easing.InQuad
+        }
+
+        Timer {
+            id: playtimeToastTimer
+            interval: 5000
+            onTriggered: playtimeToastHideAnim.start()
+        }
+
+        function show(message) {
+            playtimeToastText.text = message
+            playtimeToastHideAnim.stop()
+            playtimeToastShowAnim.start()
+            playtimeToastTimer.restart()
+        }
+    }
+
+    // PlaytimeManager signal handlers
+    Connections {
+        target: PlaytimeManager
+
+        function onWarningMessage(message) {
+            playtimeToast.show(message)
+        }
+
+        function onIdleTimeoutWarning(minutesRemaining) {
+            playtimeToast.show(qsTr("Idle warning: Session will end in %1 minute(s) if no activity").arg(minutesRemaining))
+        }
+
+        function onSessionExpired() {
+            playtimeToast.show(qsTr("Session ended - playtime exhausted"))
         }
     }
 }

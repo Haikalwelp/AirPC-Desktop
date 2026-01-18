@@ -2,6 +2,7 @@
 #include "nvcomputer.h"
 #include "nvapp.h"
 #include "nvaddress.h"
+#include "playtimemanager.h"
 #include "../streaming/session.h"
 #include "../settings/streamingpreferences.h"
 
@@ -30,6 +31,12 @@ AirPCStreamBridge* AirPCStreamBridge::get()
         s_instance = new AirPCStreamBridge();
     }
     return s_instance;
+}
+
+void AirPCStreamBridge::setPlaytimeManager(PlaytimeManager* manager)
+{
+    m_playtimeManager = manager;
+    qInfo() << "AirPCStreamBridge: PlaytimeManager connected";
 }
 
 void AirPCStreamBridge::launchFromApiResponse(
@@ -104,10 +111,20 @@ void AirPCStreamBridge::launchFromApiResponse(
     
     qInfo() << "AirPCStreamBridge: Session created, emitting sessionCreated signal";
     
+    // Store session info for playtime tracking
+    m_currentSessionToken = response.sessionToken;
+    m_currentPlaytimeSeconds = response.playtimeSeconds;
+    
     // Emit the session for QML to use (follows the pattern from startstream.cpp)
     // The QML side will call session.exec(window) to actually start streaming
     emit sessionCreated(appName, m_currentSession);
     emit streamStarted();
+    
+    // Start playtime tracking if we have a PlaytimeManager and playtime available
+    if (m_playtimeManager && m_currentPlaytimeSeconds > 0) {
+        qInfo() << "AirPCStreamBridge: Starting playtime tracking with" << m_currentPlaytimeSeconds << "seconds";
+        m_playtimeManager->startSession(m_currentSessionToken, m_currentPlaytimeSeconds);
+    }
 }
 
 bool AirPCStreamBridge::isStreamActive() const
@@ -211,6 +228,8 @@ void AirPCStreamBridge::cleanup()
     }
     
     m_currentAppName.clear();
+    m_currentSessionToken.clear();
+    m_currentPlaytimeSeconds = 0;
 }
 
 // Session signal handlers
@@ -239,6 +258,12 @@ void AirPCStreamBridge::onSessionDisplayLaunchError(const QString& text)
 void AirPCStreamBridge::onSessionFinished(int portTestResult)
 {
     qInfo() << "AirPCStreamBridge: Session finished, port test result:" << portTestResult;
+    
+    // Stop playtime tracking
+    if (m_playtimeManager) {
+        qInfo() << "AirPCStreamBridge: Stopping playtime tracking";
+        m_playtimeManager->endSession();
+    }
     
     QString reason;
     if (portTestResult == 0) {
