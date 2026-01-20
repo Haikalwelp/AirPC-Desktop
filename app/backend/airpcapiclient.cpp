@@ -956,6 +956,73 @@ void AirPCApiClient::fetchClaimHistory()
 }
 
 // ============================================================================
+// Embed Token
+// ============================================================================
+
+QString AirPCApiClient::getWebBaseUrl() const
+{
+    // Convert API URL to web URL (e.g., https://api.airpc.co -> https://web.airpc.co)
+    QString webBase = m_apiBaseUrl;
+    webBase.replace("://api.", "://web.");  // https://api.airpc.co -> https://web.airpc.co
+    webBase.replace("/api", "");             // Remove trailing /api if present
+    
+    qDebug() << "getWebBaseUrl: API=" << m_apiBaseUrl << "-> Web=" << webBase;
+    return webBase;
+}
+
+void AirPCApiClient::createEmbedToken()
+{
+    if (m_authToken.isEmpty()) {
+        emit embedTokenFailed(tr("Not authenticated"));
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/auth/create-embed-token", true);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject body;
+    body["device_id"] = getDeviceId();  // Use getter to ensure device ID is initialized
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QString error = reply->errorString();
+            QByteArray data = reply->readAll();
+            if (!data.isEmpty()) {
+                QJsonDocument doc = QJsonDocument::fromJson(data);
+                if (doc.isObject() && doc.object().contains("message")) {
+                    error = doc.object()["message"].toString();
+                }
+            }
+            qWarning() << "createEmbedToken failed:" << error;
+            emit embedTokenFailed(error);
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject json = doc.object();
+
+        if (!json["success"].toBool()) {
+            emit embedTokenFailed(json["message"].toString(tr("Failed to create embed token")));
+            return;
+        }
+
+        QString token = json["embed_token"].toString();
+        if (token.isEmpty()) {
+            emit embedTokenFailed(tr("Empty embed token received"));
+            return;
+        }
+
+        qInfo() << "Embed token created successfully";
+        emit embedTokenCreated(token);
+    });
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

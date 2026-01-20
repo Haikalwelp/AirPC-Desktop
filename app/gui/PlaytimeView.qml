@@ -1,258 +1,313 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtWebEngine
 import AirPCApiClient 1.0
+import "." as App
 
+/**
+ * PlaytimeView - Embedded web client for playtime purchase.
+ *
+ * Uses WebEngineView to load the web client's playtime page,
+ * providing 100% feature parity including Adyen payment support.
+ */
 Item {
-    id: playtimeView
-    
-    // Refresh profile on load
-    Component.onCompleted: {
-        AirPCApiClient.fetchProfile()
-        AirPCApiClient.fetchClaimHistory()
-    }
-    
+    id: root
+    objectName: qsTr("Playtime")
+
     // State
-    property int playtimeSeconds: 0
-    property int claimCount: 0
-    property var claimHistory: []
-    property string claimError: ""
-    property bool claiming: false
-    
-    // Connect signals
+    property string embedToken: ""
+    property bool isLoading: true
+    property bool hasError: false
+    property string errorMessage: ""
+    property bool pageLoaded: false
+
+    // Allowed URL patterns for navigation
+    readonly property var allowedDomains: [
+        "airpc.co",
+        "airpc.my",
+        "adyen.com",
+        "touchngo.com.my",
+        "fpx.com.my"
+    ]
+
+    // Request embed token on load
+    Component.onCompleted: {
+        requestEmbedToken()
+    }
+
+    function requestEmbedToken() {
+        isLoading = true
+        hasError = false
+        errorMessage = ""
+        pageLoaded = false
+        AirPCApiClient.createEmbedToken()
+    }
+
+    function isAllowedUrl(url) {
+        var urlStr = url.toString().toLowerCase()
+        for (var i = 0; i < allowedDomains.length; i++) {
+            if (urlStr.indexOf(allowedDomains[i]) !== -1) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // Check if URL is an allowed path within AirPC (only /playtime pages)
+    function isAllowedPlaytimePath(url) {
+        var urlStr = url.toString().toLowerCase()
+        
+        // Allow playtime paths on airpc domains
+        if (urlStr.indexOf("airpc.co") !== -1 || urlStr.indexOf("airpc.my") !== -1) {
+            // Only allow /playtime and /playtime/receipt paths
+            if (urlStr.indexOf("/playtime") !== -1) {
+                return true
+            }
+            return false
+        }
+        
+        // Allow payment provider domains (Adyen, FPX, TNG, etc.)
+        var paymentDomains = ["adyen.com", "touchngo.com.my", "fpx.com.my", "maybank2u.com.my", "cimbclicks.com.my"]
+        for (var i = 0; i < paymentDomains.length; i++) {
+            if (urlStr.indexOf(paymentDomains[i]) !== -1) {
+                return true
+            }
+        }
+        
+        return false
+    }
+
+    // API connections
     Connections {
         target: AirPCApiClient
-        
-        function onProfileLoaded(playtimeSeconds, claimCount, username, email) {
-            playtimeView.playtimeSeconds = playtimeSeconds
-            playtimeView.claimCount = claimCount
+
+        function onEmbedTokenCreated(token) {
+            root.embedToken = token
+            var baseUrl = AirPCApiClient.getWebBaseUrl()
+            var fullUrl = baseUrl + "/playtime?embed_token=" + token + "&embedded=true&platform=desktop"
+            console.log("Loading playtime URL:", fullUrl)
+            webView.url = fullUrl
         }
-        
-        function onClaimSucceeded(granted, total) {
-            playtimeView.playtimeSeconds = total
-            playtimeView.claiming = false
-            orderInput.text = ""
-            claimError = ""
-            AirPCApiClient.fetchClaimHistory()
-        }
-        
-        function onClaimFailed(error) {
-            playtimeView.claiming = false
-            playtimeView.claimError = error
-        }
-        
-        function onClaimHistoryReceived(claims) {
-            playtimeView.claimHistory = claims
+
+        function onEmbedTokenFailed(error) {
+            root.isLoading = false
+            root.hasError = true
+            root.errorMessage = error
         }
     }
-    
-    // Format helper
-    function formatPlaytime(seconds) {
-        if (seconds <= 0) return "0m"
-        var hours = Math.floor(seconds / 3600)
-        var minutes = Math.floor((seconds % 3600) / 60)
-        if (hours > 0 && minutes > 0) return hours + "h " + minutes + "m"
-        if (hours > 0) return hours + "h"
-        return minutes + "m"
-    }
-    
-    ScrollView {
+
+    // AirPC Gradient Background (visible behind WebView during loading)
+    Rectangle {
+        id: background
         anchors.fill: parent
-        contentWidth: availableWidth
-        
+
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: App.AirPCTheme.gradientStop1 }
+            GradientStop { position: 0.33; color: App.AirPCTheme.gradientStop2 }
+            GradientStop { position: 0.66; color: App.AirPCTheme.gradientStop3 }
+            GradientStop { position: 1.0; color: App.AirPCTheme.gradientStop4 }
+        }
+    }
+
+    // WebEngineView
+    WebEngineView {
+        id: webView
+        anchors.fill: parent
+        visible: root.pageLoaded && !root.hasError
+        backgroundColor: "transparent"
+
+        settings.javascriptEnabled: true
+        settings.localStorageEnabled: true
+        settings.pluginsEnabled: true
+
+        onLoadingChanged: function(loadRequest) {
+            switch (loadRequest.status) {
+            case WebEngineView.LoadStartedStatus:
+                root.isLoading = true
+                break
+
+            case WebEngineView.LoadSucceededStatus:
+                root.isLoading = false
+                root.pageLoaded = true
+                root.hasError = false
+                break
+
+            case WebEngineView.LoadFailedStatus:
+                root.isLoading = false
+                root.hasError = true
+                root.errorMessage = loadRequest.errorString || qsTr("Failed to load page")
+                console.error("WebView load failed:", loadRequest.errorString)
+                break
+            }
+        }
+
+        onUrlChanged: {
+            var urlStr = url.toString()
+            console.log("WebView URL changed:", urlStr)
+
+            // Detect payment completion
+            if (urlStr.indexOf("/playtime/receipt") !== -1) {
+                if (urlStr.indexOf("success=true") !== -1) {
+                    // Payment successful - refresh profile
+                    console.log("Payment successful, refreshing profile")
+                    AirPCApiClient.fetchProfile()
+                } else if (urlStr.indexOf("error=") !== -1) {
+                    // Payment failed - extract error
+                    var errorMatch = urlStr.match(/error=([^&]+)/)
+                    if (errorMatch) {
+                        console.warn("Payment error:", decodeURIComponent(errorMatch[1]))
+                    }
+                }
+            }
+
+            // Detect session expiry (redirect to login)
+            if (urlStr.indexOf("/login") !== -1 || urlStr.indexOf("/auth") !== -1) {
+                console.warn("Session expired, logging out")
+                AirPCApiClient.logout()
+            }
+        }
+
+        onNewWindowRequested: function(request) {
+            // Allow Adyen 3DS popups and payment redirects (only playtime paths + payment domains)
+            if (isAllowedPlaytimePath(request.requestedUrl)) {
+                console.log("Allowing popup:", request.requestedUrl)
+                request.openIn(webView)
+            } else {
+                // Block popups to non-playtime pages
+                console.log("Blocking popup (not playtime path):", request.requestedUrl)
+                // Don't open - just block
+            }
+        }
+
+        onNavigationRequested: function(request) {
+            var urlStr = request.url.toString()
+            console.log("Navigation requested:", urlStr, "Type:", request.navigationType)
+            
+            // Only allow navigation to /playtime paths and payment domains
+            if (isAllowedPlaytimePath(request.url)) {
+                console.log("Allowing navigation to:", urlStr)
+                request.accept()
+            } else {
+                // Block navigation to non-playtime pages (games, profile, etc.)
+                console.log("Blocking navigation (not playtime path):", urlStr)
+                request.reject()
+                // Don't open externally - just block silently since it's an internal link
+            }
+        }
+
+        onRenderProcessTerminated: function(terminationStatus, exitCode) {
+            console.error("WebView render process terminated:", terminationStatus, exitCode)
+            root.hasError = true
+            root.errorMessage = qsTr("Page crashed. Please retry.")
+        }
+    }
+
+    // Loading Overlay
+    Rectangle {
+        anchors.fill: parent
+        visible: root.isLoading
+        color: "transparent"
+
         ColumnLayout {
-            width: parent.width
+            anchors.centerIn: parent
+            spacing: 16
+
+            BusyIndicator {
+                Layout.alignment: Qt.AlignHCenter
+                running: root.isLoading
+                palette.dark: App.AirPCTheme.textOnGradient
+            }
+
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                text: root.embedToken.length > 0 ?
+                    qsTr("Loading payment options...") :
+                    qsTr("Preparing secure connection...")
+                font.pixelSize: 14
+                font.family: App.AirPCTheme.fontFamily
+                color: App.AirPCTheme.textOnGradient
+            }
+        }
+    }
+
+    // Slow Loading Hint
+    Timer {
+        id: slowLoadTimer
+        interval: 5000
+        running: root.isLoading
+        onTriggered: slowLoadHint.visible = true
+    }
+
+    Text {
+        id: slowLoadHint
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 100
+        visible: false
+        text: qsTr("Taking longer than usual...")
+        font.pixelSize: 12
+        font.family: App.AirPCTheme.fontFamily
+        color: App.AirPCTheme.textOnGradientMuted
+    }
+
+    // Error Overlay
+    Rectangle {
+        anchors.fill: parent
+        visible: root.hasError
+        color: "transparent"
+
+        ColumnLayout {
+            anchors.centerIn: parent
             spacing: 24
-            
-            // Balance Card
+            width: Math.min(400, parent.width - 64)
+
+            // Error card
             Rectangle {
                 Layout.fillWidth: true
-                Layout.margins: 16
-                height: 120
-                radius: 12
-                color: "#1a1a2e"
-                border.color: "#4a4a6a"
-                border.width: 1
-                
+                Layout.preferredHeight: errorContent.implicitHeight + 56
+                color: App.AirPCTheme.glassBackground
+                radius: App.AirPCTheme.glassRadius
+                border.color: App.AirPCTheme.glassBorder
+                border.width: App.AirPCTheme.glassBorderWidth
+
                 ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 8
-                    
+                    id: errorContent
+                    anchors.fill: parent
+                    anchors.margins: 28
+                    spacing: 16
+
                     Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "Your Playtime Balance"
-                        color: "#888"
+                        Layout.fillWidth: true
+                        text: qsTr("Unable to Load")
+                        font.pixelSize: 20
+                        font.weight: Font.Bold
+                        font.family: App.AirPCTheme.fontFamily
+                        color: App.AirPCTheme.textPrimary
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.errorMessage || qsTr("Please check your internet connection and try again.")
                         font.pixelSize: 14
-                    }
-                    
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: formatPlaytime(playtimeSeconds)
-                        color: "#fff"
-                        font.pixelSize: 36
-                        font.bold: true
-                    }
-                    
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: claimCount + " orders claimed"
-                        color: "#666"
-                        font.pixelSize: 12
-                    }
-                }
-            }
-            
-            // Claim Order Section
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.margins: 16
-                height: claimColumn.height + 32
-                radius: 12
-                color: "#1a1a2e"
-                border.color: "#4a4a6a"
-                border.width: 1
-                
-                ColumnLayout {
-                    id: claimColumn
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 16
-                    spacing: 12
-                    
-                    Text {
-                        text: "Claim Shopee Order"
-                        color: "#fff"
-                        font.pixelSize: 18
-                        font.bold: true
-                    }
-                    
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Enter your Shopee order number to receive 2 hours of playtime."
-                        color: "#888"
-                        font.pixelSize: 13
+                        font.family: App.AirPCTheme.fontFamily
+                        color: App.AirPCTheme.textMuted
                         wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
                     }
-                    
-                    RowLayout {
+
+                    App.PrimaryButton {
                         Layout.fillWidth: true
-                        spacing: 8
-                        
-                        TextField {
-                            id: orderInput
-                            Layout.fillWidth: true
-                            placeholderText: "e.g., 241230ABCD1234"
-                            color: "#fff"
-                            placeholderTextColor: "#666"
-                            background: Rectangle {
-                                color: "#0d0d1a"
-                                radius: 6
-                                border.color: orderInput.focus ? "#6366f1" : "#333"
-                            }
-                        }
-                        
-                        Button {
-                            text: claiming ? "Claiming..." : "Claim"
-                            enabled: orderInput.text.length > 0 && !claiming
-                            onClicked: {
-                                claiming = true
-                                claimError = ""
-                                AirPCApiClient.claimOrder(orderInput.text.trim())
-                            }
-                            
-                            background: Rectangle {
-                                color: parent.enabled ? "#6366f1" : "#333"
-                                radius: 6
-                            }
-                            
-                            contentItem: Text {
-                                text: parent.text
-                                color: parent.enabled ? "#fff" : "#666"
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-                        }
-                    }
-                    
-                    // Error message
-                    Text {
-                        visible: claimError.length > 0
-                        text: claimError
-                        color: "#ef4444"
-                        font.pixelSize: 13
-                    }
-                }
-            }
-            
-            // Claim History Section
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.margins: 16
-                height: historyColumn.height + 32
-                radius: 12
-                color: "#1a1a2e"
-                border.color: "#4a4a6a"
-                border.width: 1
-                
-                ColumnLayout {
-                    id: historyColumn
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 16
-                    spacing: 12
-                    
-                    Text {
-                        text: "Claim History"
-                        color: "#fff"
-                        font.pixelSize: 18
-                        font.bold: true
-                    }
-                    
-                    // Empty state
-                    Text {
-                        visible: claimHistory.length === 0
-                        text: "No claims yet"
-                        color: "#666"
-                        font.pixelSize: 13
-                    }
-                    
-                    // History list
-                    Repeater {
-                        model: claimHistory
-                        
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 48
-                            color: "#0d0d1a"
-                            radius: 6
-                            
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                
-                                Text {
-                                    text: modelData.orderSn || ""
-                                    color: "#fff"
-                                    font.pixelSize: 14
-                                }
-                                
-                                Item { Layout.fillWidth: true }
-                                
-                                Text {
-                                    text: "+" + formatPlaytime(modelData.playtimeGranted || 0)
-                                    color: "#22c55e"
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                }
-                            }
+                        text: qsTr("Retry")
+                        onClicked: {
+                            slowLoadHint.visible = false
+                            requestEmbedToken()
                         }
                     }
                 }
             }
-            
-            // Spacer
-            Item { Layout.fillHeight: true }
         }
     }
 }

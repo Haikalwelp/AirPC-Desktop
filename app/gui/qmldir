@@ -1,1 +1,4 @@
 singleton Router 1.0 Router.qml
+singleton AirPCTheme 1.0 AirPCTheme.qml
+GlassCard 1.0 GlassCard.qml
+PrimaryButton 1.0 PrimaryButton.qml

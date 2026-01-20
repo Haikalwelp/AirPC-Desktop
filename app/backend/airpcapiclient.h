@@ -262,10 +262,16 @@ public:
     Q_INVOKABLE void claimOrder(const QString& orderSn);
     Q_INVOKABLE void fetchClaimHistory();
 
+    // Embed token
+    Q_INVOKABLE void createEmbedToken();
+
     // Configuration
     QString apiBaseUrl() const { return m_apiBaseUrl; }
     void setApiBaseUrl(const QString& url);
     QString getDeviceId();  // Device ID for session management
+
+    // Web base URL for embedded views
+    Q_INVOKABLE QString getWebBaseUrl() const;
 
 signals:
     // Authentication signals
@@ -299,6 +305,10 @@ signals:
     void claimFailed(const QString& error);
     // Claim history as QVariantList for QML compatibility
     void claimHistoryReceived(const QVariantList& claims);
+
+    // Embed token for WebEngineView
+    void embedTokenCreated(const QString& token);
+    void embedTokenFailed(const QString& error);
 
 private:
     explicit AirPCApiClient(QObject* parent = nullptr);

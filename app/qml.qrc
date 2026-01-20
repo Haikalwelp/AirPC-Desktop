@@ -30,6 +30,9 @@
         <file>gui/NavButton.qml</file>
         <file>gui/PlaytimeView.qml</file>
         <file>gui/ProfileView.qml</file>
+        <file>gui/AirPCTheme.qml</file>
+        <file>gui/GlassCard.qml</file>
+        <file>gui/PrimaryButton.qml</file>
         <file>gui/qmldir</file>
     </qresource>
 </RCC>
