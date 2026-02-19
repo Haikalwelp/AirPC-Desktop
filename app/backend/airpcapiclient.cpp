@@ -1371,6 +1371,118 @@ void AirPCApiClient::fetchBillingPurchases(int page, int pageSize)
     });
 }
 
+void AirPCApiClient::fetchBillingSkus()
+{
+    if (!isLoggedIn()) {
+        emit billingSkusReceived(QVariantList());
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/billing/skus");
+    QNetworkReply* reply = m_nam.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QString error = reply->errorString();
+            QJsonDocument errorDoc = QJsonDocument::fromJson(reply->readAll());
+            if (errorDoc.isObject()) {
+                error = errorDoc.object()["message"].toString(error);
+            }
+            emit billingSkusFailed(error);
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+        if (!json["success"].toBool()) {
+            emit billingSkusFailed(json["message"].toString("Failed to load SKUs"));
+            return;
+        }
+
+        QVariantList skus;
+        for (const QJsonValue& value : json["skus"].toArray()) {
+            skus.append(value.toObject().toVariantMap());
+        }
+
+        emit billingSkusReceived(skus);
+    });
+}
+
+void AirPCApiClient::createAdyenSession(int skuId, const QString& returnUrl)
+{
+    if (!isLoggedIn()) {
+        emit adyenSessionFailed("Not logged in");
+        return;
+    }
+
+    if (skuId <= 0) {
+        emit adyenSessionFailed("Invalid SKU");
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/billing/adyen/session");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject body;
+    body["sku_id"] = skuId;
+    body["return_url"] = returnUrl;
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            emit adyenSessionFailed(json["message"].toString(reply->errorString()));
+            return;
+        }
+
+        if (!json["success"].toBool()) {
+            emit adyenSessionFailed(json["message"].toString("Failed to create payment session"));
+            return;
+        }
+
+        emit adyenSessionCreated(json.toVariantMap());
+    });
+}
+
+void AirPCApiClient::fetchBillingPurchase(int purchaseId)
+{
+    if (!isLoggedIn()) {
+        emit billingPurchaseFailed("Not logged in");
+        return;
+    }
+
+    if (purchaseId <= 0) {
+        emit billingPurchaseFailed("Invalid purchase id");
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + QString("/api/v1/billing/purchases/%1").arg(purchaseId));
+    QNetworkReply* reply = m_nam.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            emit billingPurchaseFailed(json["message"].toString(reply->errorString()));
+            return;
+        }
+
+        if (!json["success"].toBool()) {
+            emit billingPurchaseFailed(json["message"].toString("Failed to retrieve purchase"));
+            return;
+        }
+
+        emit billingPurchaseReceived(json.toVariantMap());
+    });
+}
+
 void AirPCApiClient::fetchEntitlements()
 {
     if (!isLoggedIn()) {

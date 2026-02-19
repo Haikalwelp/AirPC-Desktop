@@ -292,6 +292,9 @@ public:
     // Profile
     Q_INVOKABLE void fetchProfile();
     Q_INVOKABLE void fetchBillingPurchases(int page = 1, int pageSize = 10);
+    Q_INVOKABLE void fetchBillingSkus();
+    Q_INVOKABLE void createAdyenSession(int skuId, const QString& returnUrl);
+    Q_INVOKABLE void fetchBillingPurchase(int purchaseId);
 
     // Heartbeat
     Q_INVOKABLE void sendHeartbeat();
@@ -368,6 +371,12 @@ signals:
     void claimHistoryReceived(const QVariantList& claims);
     void billingPurchasesReceived(const QVariantList& purchases, int count, int page, bool hasMore);
     void billingPurchasesFailed(const QString& error);
+    void billingSkusReceived(const QVariantList& skus);
+    void billingSkusFailed(const QString& error);
+    void adyenSessionCreated(const QVariantMap& sessionData);
+    void adyenSessionFailed(const QString& error);
+    void billingPurchaseReceived(const QVariantMap& purchase);
+    void billingPurchaseFailed(const QString& error);
 
     // Embed token for WebEngineView
     void embedTokenCreated(const QString& token);
