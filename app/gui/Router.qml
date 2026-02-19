@@ -1,7 +1,6 @@
 pragma Singleton
 
 import QtQuick
-import QtQuick.Controls
 
 import AirPCApiClient 1.0
 
@@ -41,6 +40,16 @@ QtObject {
             url: "qrc:/gui/AirPCShellView.qml",
             protected: true,
             objectName: "Shell"
+        },
+        "forgot-password": {
+            url: "qrc:/gui/AirPCForgotPasswordView.qml",
+            protected: false,
+            objectName: "ForgotPasswordView"
+        },
+        "signup": {
+            url: "qrc:/gui/AirPCSignupView.qml",
+            protected: false,
+            objectName: "SignupView"
         }
     })
 
@@ -123,6 +132,13 @@ QtObject {
             console.log("[Router] Route is protected and user is not logged in, redirecting to login")
             pendingRoute = "games"
             navigateToRoute("login", "push")
+            return
+        }
+
+        // If user is already logged in and tries to navigate to a public-only auth route, redirect to games
+        if (!routeConfig.protected && isLoggedIn && (routeName === "forgot-password" || routeName === "signup")) {
+            console.log("[Router] Already logged in, redirecting to games instead of:", routeName)
+            switchTab("games")
             return
         }
 

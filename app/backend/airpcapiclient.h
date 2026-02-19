@@ -53,6 +53,9 @@ public:
     QString title;
     QString uuid;
     bool hdrSupported = false;
+    int availableCount = 0;
+    int onlineCount = 0;
+    bool isCatalog = false;
     QString computerName;
     QString computerUuid;
     QString hostname;
@@ -140,8 +143,11 @@ public:
     int accountId = 0;
     QString username;
     QString email;
+    int subscriptionSeconds = 0;
     int playtimeSeconds = 0;
     int claimCount = 0;
+    int availableVouchers = 0;
+    QVariantMap activeVoucher;
 
     static AirPCUserProfile fromJson(const QJsonObject& json);
 };
@@ -214,6 +220,10 @@ class AirPCApiClient : public QObject
     Q_PROPERTY(QString username READ username NOTIFY loginStateChanged)
     Q_PROPERTY(bool isLoading READ isLoading NOTIFY loadingChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorOccurred)
+    Q_PROPERTY(bool hasActiveSession READ hasActiveSession NOTIFY activeSessionChanged)
+    Q_PROPERTY(QVariantMap activeSession READ activeSessionVariant NOTIFY activeSessionChanged)
+    Q_PROPERTY(QVariantMap entitlements READ entitlements NOTIFY entitlementsChanged)
+    Q_PROPERTY(QVariantMap queueState READ queueState NOTIFY queueStateChanged)
 
 public:
     static AirPCApiClient* get();
@@ -221,6 +231,13 @@ public:
     // Authentication
     Q_INVOKABLE void login(const QString& username, const QString& password, bool rememberMe);
     Q_INVOKABLE void logout();
+
+    // Auth flows
+    Q_INVOKABLE void forgotPassword(const QString& email);
+    Q_INVOKABLE void signup(const QString& username, const QString& email,
+                            const QString& password, const QString& confirmPassword);
+    Q_INVOKABLE void resendVerification(const QString& email);
+
     bool isLoggedIn() const;
     QString username() const;
     QString authToken() const;
@@ -237,22 +254,44 @@ public:
     // Apps (via Go API proxy)
     Q_INVOKABLE void fetchAppsForAllocation(const AirPCAllocation& allocation);
     Q_INVOKABLE void fetchAllApps();
+    Q_INVOKABLE void fetchCatalogGames();
     QList<AirPCPublicApp> apps() const { return m_apps; }
 
     // Stream management
     Q_INVOKABLE void launchStream(const QString& computerUuid, const QString& appId, const QString& appUuid);
+    Q_INVOKABLE void launchSharedPoolGame(const QString& gameUuid,
+                                          const QString& gameTitle = QString(),
+                                          const QString& fundingSource = "auto",
+                                          int subscriptionInstanceId = 0);
     Q_INVOKABLE void endSession();
     Q_INVOKABLE void resumeSession();
+    Q_INVOKABLE void fetchSharedPoolActiveSession();
+
+    // Entitlements / queue
+    Q_INVOKABLE void fetchEntitlements();
+    Q_INVOKABLE void joinQueue(const QString& gameUuid,
+                               const QString& gameTitle,
+                               const QString& fundingSource = "auto",
+                               int subscriptionInstanceId = 0);
+    Q_INVOKABLE void leaveQueue();
+    Q_INVOKABLE void fetchQueueStatus();
+    Q_INVOKABLE void claimQueue(const QString& claimToken,
+                                const QString& fundingSource = "auto",
+                                int subscriptionInstanceId = 0);
 
     // Session management
     AirPCActiveSession activeSession() const { return m_activeSession; }
     bool hasActiveSession() const { return m_activeSession.isValid(); }
+    QVariantMap activeSessionVariant() const;
+    QVariantMap entitlements() const { return m_entitlements; }
+    QVariantMap queueState() const { return m_queueState; }
     Q_INVOKABLE void saveActiveSession(const AirPCActiveSession& session);
     Q_INVOKABLE void clearActiveSession();
     Q_INVOKABLE void loadActiveSession();
 
     // Profile
     Q_INVOKABLE void fetchProfile();
+    Q_INVOKABLE void fetchBillingPurchases(int page = 1, int pageSize = 10);
 
     // Heartbeat
     Q_INVOKABLE void sendHeartbeat();
@@ -280,6 +319,18 @@ signals:
     void loginFailed(const QString& error);
     void logoutCompleted();
 
+    // Forgot password signals
+    void forgotPasswordSuccess();
+    void forgotPasswordFailed(const QString& error);
+
+    // Signup signals
+    void signupSuccess(const QString& registeredEmail);
+    void signupFailed(const QString& error);
+
+    // Resend verification signals
+    void resendVerificationSuccess();
+    void resendVerificationFailed(const QString& error);
+
     // Data loading signals
     void loadingChanged();
     void errorOccurred(const QString& error);
@@ -288,12 +339,22 @@ signals:
     void appsLoadProgress(int loaded, int total);
     // Profile signal with individual values for QML compatibility
     void profileLoaded(int playtimeSeconds, int claimCount, const QString& username, const QString& email);
+    void profileDataLoaded(const QVariantMap& profile);
 
     // Stream signals
     void streamLaunched(const AirPCStreamLaunchResponse& response);
     void streamLaunchFailed(const QString& error);
     void sessionEnded();
     void activeSessionChanged();
+
+    // Shared-pool state signals
+    void entitlementsChanged();
+    void queueStateChanged();
+    void queueJoinSucceeded(int position, const QString& gameTitle);
+    void queueJoinFailed(const QString& error);
+    void queueLeft();
+    void queueClaimSucceeded();
+    void queueClaimFailed(const QString& error);
 
     // Heartbeat signals
     void heartbeatReceived(bool valid, int remainingSeconds, int remainingPlaytime, 
@@ -305,6 +366,8 @@ signals:
     void claimFailed(const QString& error);
     // Claim history as QVariantList for QML compatibility
     void claimHistoryReceived(const QVariantList& claims);
+    void billingPurchasesReceived(const QVariantList& purchases, int count, int page, bool hasMore);
+    void billingPurchasesFailed(const QString& error);
 
     // Embed token for WebEngineView
     void embedTokenCreated(const QString& token);
@@ -341,6 +404,8 @@ private:
     QList<AirPCAllocation> m_allocations;
     QList<AirPCPublicApp> m_apps;
     AirPCActiveSession m_activeSession;
+    QVariantMap m_entitlements;
+    QVariantMap m_queueState;
 
     // Settings
     QSettings m_settings;

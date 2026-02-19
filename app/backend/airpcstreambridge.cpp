@@ -186,15 +186,41 @@ NvComputer* AirPCStreamBridge::createSyntheticComputer(const AirPCStreamLaunchRe
         return computer;
     }
     catch (const GfeHttpResponseException& e) {
-        qWarning() << "AirPCStreamBridge: Failed to fetch serverinfo:" << e.toQString();
-        emit launchError("Failed to connect to game server: " + e.toQString());
-        return nullptr;
+        qWarning() << "AirPCStreamBridge: Failed to fetch serverinfo, using fallback computer:" << e.toQString();
+        return createFallbackComputer(response);
     }
     catch (const QtNetworkReplyException& e) {
-        qWarning() << "AirPCStreamBridge: Network error fetching serverinfo:" << e.toQString();
-        emit launchError("Network error: " + e.toQString());
-        return nullptr;
+        qWarning() << "AirPCStreamBridge: Network error fetching serverinfo, using fallback computer:" << e.toQString();
+        return createFallbackComputer(response);
     }
+}
+
+NvComputer* AirPCStreamBridge::createFallbackComputer(const AirPCStreamLaunchResponse& response) const
+{
+    NvComputer* computer = new NvComputer();
+
+    computer->name = response.computerName.isEmpty() ? response.streamHost : response.computerName;
+    computer->uuid = response.computerUuid;
+    computer->activeAddress = NvAddress(response.streamHost, static_cast<uint16_t>(response.streamPort));
+    computer->activeHttpsPort = static_cast<uint16_t>(response.streamHttpsPort > 0 ? response.streamHttpsPort : DEFAULT_HTTPS_PORT);
+    computer->state = NvComputer::CS_ONLINE;
+    computer->pairState = NvComputer::PS_PAIRED;
+
+    computer->isApiSession = true;
+    computer->sessionToken = response.sessionToken;
+    computer->sessionId = response.sessionId;
+    computer->playtimeSeconds = response.playtimeSeconds;
+    computer->goApiBaseUrl = AirPCApiClient::get()->apiBaseUrl();
+    computer->deviceId = AirPCApiClient::get()->getDeviceId();
+
+    qInfo() << "AirPCStreamBridge: Fallback computer created"
+            << "name:" << computer->name
+            << "uuid:" << computer->uuid
+            << "host:" << response.streamHost
+            << "rtspPort:" << response.streamPort
+            << "httpsPort:" << computer->activeHttpsPort;
+
+    return computer;
 }
 
 NvApp AirPCStreamBridge::createApp(const QString& name, int id)

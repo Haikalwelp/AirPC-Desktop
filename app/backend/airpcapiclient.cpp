@@ -6,10 +6,61 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QNetworkRequest>
+#include <QSslError>
+#include <QUrl>
 #include <QUrlQuery>
 #include <QUuid>
 #include <QCoreApplication>
 #include <QSysInfo>
+#include <QDateTime>
+
+static AirPCStreamLaunchResponse parseSharedPoolSession(const QJsonObject& session,
+                                                        const QString& fallbackTitle = QString())
+{
+    AirPCStreamLaunchResponse response;
+    response.success = true;
+    response.sessionId = session["session_id"].toString();
+    response.sessionToken = session["session_token"].toString();
+
+    const QJsonObject computer = session["computer"].toObject();
+    response.computerUuid = computer["uuid"].toString();
+    response.computerName = computer["name"].toString();
+    response.streamHost = computer["hostname"].toString();
+    response.streamPort = computer["port"].toInt();
+    response.streamHttpsPort = computer.contains("https_port")
+        ? computer["https_port"].toInt(0)
+        : 0;
+
+    const QJsonObject game = session["game"].toObject();
+    response.appId = QString::number(game["id"].toInt());
+    response.appName = game["title"].toString();
+    if (response.appName.isEmpty()) {
+        response.appName = fallbackTitle;
+    }
+
+    response.playtimeSeconds = session["subscription_seconds"].toInt(
+        session["playtime_seconds"].toInt());
+
+    return response;
+}
+
+static AirPCActiveSession toActiveSession(const AirPCStreamLaunchResponse& response)
+{
+    AirPCActiveSession session;
+    session.sessionId = response.sessionId;
+    session.computerUuid = response.computerUuid;
+    session.computerName = response.computerName;
+    session.hostname = response.streamHost;
+    session.port = response.streamPort;
+    session.httpsPort = response.streamHttpsPort;
+    session.appId = response.appId;
+    session.appName = response.appName;
+    session.sessionToken = response.sessionToken;
+    session.playtimeSeconds = response.playtimeSeconds;
+    session.startedAt = QDateTime::currentMSecsSinceEpoch();
+    session.lastConnected = session.startedAt;
+    return session;
+}
 
 // ============================================================================
 // AirPCAllocation Implementation
@@ -70,6 +121,9 @@ AirPCPublicApp AirPCPublicApp::fromJson(const QJsonObject& json, const AirPCAllo
     app.title = json["title"].toString();
     app.uuid = json["uuid"].toString();
     app.hdrSupported = json["hdr_supported"].toBool();
+    app.availableCount = 0;
+    app.onlineCount = 0;
+    app.isCatalog = false;
     app.computerName = allocation.computerName;
     app.computerUuid = allocation.computerUuid;
     app.hostname = allocation.hostname;
@@ -79,6 +133,13 @@ AirPCPublicApp AirPCPublicApp::fromJson(const QJsonObject& json, const AirPCAllo
 
 QString AirPCPublicApp::getImageUrl(const QString& authToken, const QString& apiBaseUrl) const
 {
+    if (isCatalog) {
+        const QString encodedUuid = QString::fromLatin1(QUrl::toPercentEncoding(uuid));
+        return QString("%1/api/v1/catalog/games/%2/icon")
+            .arg(apiBaseUrl)
+            .arg(encodedUuid);
+    }
+
     // Image URL via API proxy: https://api.airpc.io/api/v1/computer/{uuid}/apps/{id}/icon?token=...
     return QString("%1/api/v1/computer/%2/apps/%3/icon?token=%4")
         .arg(apiBaseUrl)
@@ -181,8 +242,14 @@ AirPCUserProfile AirPCUserProfile::fromJson(const QJsonObject& json)
     profile.accountId = json["account_id"].toInt();
     profile.username = json["username"].toString();
     profile.email = json["email"].toString();
+    profile.subscriptionSeconds = json["subscription_seconds"].toInt(
+        json["playtime_seconds"].toInt());
     profile.playtimeSeconds = json["playtime_seconds"].toInt();
     profile.claimCount = json["claim_count"].toInt();
+    profile.availableVouchers = json["available_vouchers"].toInt(0);
+    if (json.contains("active_voucher") && json["active_voucher"].isObject()) {
+        profile.activeVoucher = json["active_voucher"].toObject().toVariantMap();
+    }
     return profile;
 }
 
@@ -245,6 +312,20 @@ AirPCApiClient::AirPCApiClient(QObject* parent)
     , m_nam(this)
     , m_apiBaseUrl("https://api.airpc.co") // Default API URL
 {
+    m_entitlements["subscriptionSeconds"] = 0;
+    m_entitlements["availableVouchers"] = 0;
+    m_entitlements["subscriptions"] = QVariantList();
+    m_entitlements["recommendedSubscriptionInstanceID"] = QVariant();
+    m_entitlements["activeVoucher"] = QVariant();
+
+    m_queueState["inQueue"] = false;
+    m_queueState["status"] = "not_in_queue";
+    m_queueState["position"] = 0;
+    m_queueState["gameUuid"] = QString();
+    m_queueState["gameTitle"] = QString();
+    m_queueState["claimToken"] = QString();
+    m_queueState["expiresInSeconds"] = 0;
+
     // Load saved credentials on startup
     loadCredentials();
     loadActiveSession();
@@ -348,6 +429,136 @@ void AirPCApiClient::logout()
     emit logoutCompleted();
 }
 
+void AirPCApiClient::forgotPassword(const QString& email)
+{
+    qInfo() << "AirPCApiClient: Requesting password reset for email";
+
+    m_isLoading = true;
+    emit loadingChanged();
+
+    QUrl url(m_apiBaseUrl + "/api/v1/auth/forgot-password");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setTransferTimeout(CONNECTION_TIMEOUT_MS);
+
+    QJsonObject body;
+    body["email"] = email;
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        m_isLoading = false;
+        emit loadingChanged();
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QByteArray data = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            QString error = reply->errorString();
+            if (doc.isObject() && doc.object().contains("message")) {
+                error = doc.object()["message"].toString();
+            }
+            qWarning() << "AirPCApiClient: Forgot password request failed:" << error;
+            emit forgotPasswordFailed(error);
+            return;
+        }
+
+        // Always emit success for anti-enumeration (mirrors web behavior)
+        qInfo() << "AirPCApiClient: Forgot password request sent successfully";
+        emit forgotPasswordSuccess();
+    });
+}
+
+void AirPCApiClient::signup(const QString& username, const QString& email,
+                             const QString& password, const QString& confirmPassword)
+{
+    qInfo() << "AirPCApiClient: Attempting signup for user:" << username;
+
+    m_isLoading = true;
+    emit loadingChanged();
+
+    QUrl url(m_apiBaseUrl + "/api/v1/auth/signup");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setTransferTimeout(CONNECTION_TIMEOUT_MS);
+
+    QJsonObject body;
+    body["username"] = username;
+    body["email"] = email;
+    body["password"] = password;
+    body["confirm_password"] = confirmPassword;
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, email]() {
+        m_isLoading = false;
+        emit loadingChanged();
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QByteArray data = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            QString error = reply->errorString();
+            if (doc.isObject() && doc.object().contains("message")) {
+                error = doc.object()["message"].toString();
+            }
+            qWarning() << "AirPCApiClient: Signup failed:" << error;
+            emit signupFailed(error);
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject json = doc.object();
+
+        if (!json["success"].toBool()) {
+            QString error = json["message"].toString("Signup failed");
+            qWarning() << "AirPCApiClient: Signup rejected:" << error;
+            emit signupFailed(error);
+            return;
+        }
+
+        qInfo() << "AirPCApiClient: Signup successful for:" << email;
+        emit signupSuccess(email);
+    });
+}
+
+void AirPCApiClient::resendVerification(const QString& email)
+{
+    qInfo() << "AirPCApiClient: Resending verification email";
+
+    m_isLoading = true;
+    emit loadingChanged();
+
+    QUrl url(m_apiBaseUrl + "/api/v1/auth/resend-verification");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setTransferTimeout(CONNECTION_TIMEOUT_MS);
+
+    QJsonObject body;
+    body["email"] = email;
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        m_isLoading = false;
+        emit loadingChanged();
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QByteArray data = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            QString error = reply->errorString();
+            if (doc.isObject() && doc.object().contains("message")) {
+                error = doc.object()["message"].toString();
+            }
+            qWarning() << "AirPCApiClient: Resend verification failed:" << error;
+            emit resendVerificationFailed(error);
+            return;
+        }
+
+        qInfo() << "AirPCApiClient: Verification email resent successfully";
+        emit resendVerificationSuccess();
+    });
+}
+
 bool AirPCApiClient::isLoggedIn() const
 {
     return !m_authToken.isEmpty() && !isTokenExpired(m_authToken);
@@ -361,6 +572,27 @@ QString AirPCApiClient::username() const
 QString AirPCApiClient::authToken() const
 {
     return m_authToken;
+}
+
+QVariantMap AirPCApiClient::activeSessionVariant() const
+{
+    QVariantMap map;
+    if (!m_activeSession.isValid()) {
+        return map;
+    }
+
+    map["sessionId"] = m_activeSession.sessionId;
+    map["sessionToken"] = m_activeSession.sessionToken;
+    map["computerUuid"] = m_activeSession.computerUuid;
+    map["computerName"] = m_activeSession.computerName;
+    map["hostname"] = m_activeSession.hostname;
+    map["port"] = m_activeSession.port;
+    map["httpsPort"] = m_activeSession.httpsPort;
+    map["appId"] = m_activeSession.appId;
+    map["appName"] = m_activeSession.appName;
+    map["playtimeSeconds"] = m_activeSession.playtimeSeconds;
+    map["startedAt"] = m_activeSession.startedAt;
+    return map;
 }
 
 // ============================================================================
@@ -528,6 +760,157 @@ void AirPCApiClient::fetchAllApps()
     }
 }
 
+void AirPCApiClient::fetchCatalogGames()
+{
+    if (!isLoggedIn()) {
+        qWarning() << "AirPCApiClient: Cannot fetch catalog games - not logged in";
+        emit errorOccurred("Not logged in");
+        return;
+    }
+
+    m_isLoading = true;
+    emit loadingChanged();
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/catalog/games");
+    QNetworkReply* reply = m_nam.get(request);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        m_isLoading = false;
+        emit loadingChanged();
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            handleNetworkError(reply);
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject json = doc.object();
+
+        if (!json["success"].toBool()) {
+            QString error = json["message"].toString("Failed to fetch catalog games");
+            m_errorMessage = error;
+            emit errorOccurred(error);
+            return;
+        }
+
+        QList<AirPCPublicApp> catalogGames;
+        QJsonArray games = json["games"].toArray();
+        catalogGames.reserve(games.size());
+
+        for (const QJsonValue& value : games) {
+            QJsonObject game = value.toObject();
+
+            AirPCPublicApp app;
+            if (game.contains("id") && game["id"].isString()) {
+                app.id = game["id"].toString();
+            } else {
+                app.id = QString::number(game["id"].toInt(0));
+            }
+            app.title = game["title"].toString();
+            app.uuid = game["uuid"].toString();
+            app.hdrSupported = game["hdr_supported"].toBool(false);
+            app.availableCount = game["available_count"].toInt(0);
+            app.onlineCount = game["online_count"].toInt(0);
+            app.computerUuid = game["computer_uuid"].toString();
+            if ((app.id.isEmpty() || app.id == "0") && game.contains("app_id")) {
+                app.id = game["app_id"].isString()
+                    ? game["app_id"].toString()
+                    : QString::number(game["app_id"].toInt(0));
+            }
+            app.isCatalog = true;
+            catalogGames.append(app);
+        }
+
+        m_apps = catalogGames;
+        qInfo() << "AirPCApiClient: Loaded" << m_apps.size() << "catalog games";
+        emit appsLoaded(m_apps);
+
+        const bool iconProbeEnabled = m_settings.value("airpc/debug_icon_probe", true).toBool();
+        if (iconProbeEnabled) {
+            const int probeLimit = qMin(6, m_apps.size());
+            qInfo() << "[ICON-PROBE] Starting probe for" << probeLimit << "catalog icon(s)";
+
+            for (int i = 0; i < probeLimit; ++i) {
+                const AirPCPublicApp probeApp = m_apps.at(i);
+                if (!probeApp.isCatalog) {
+                    continue;
+                }
+
+                const QString probeUrl = probeApp.getImageUrl(m_authToken, m_apiBaseUrl);
+                if (probeUrl.trimmed().isEmpty()) {
+                    qWarning() << "[ICON-PROBE] Skip empty URL"
+                               << "title=" << probeApp.title
+                               << "uuid=" << probeApp.uuid;
+                    continue;
+                }
+
+                qInfo() << "[ICON-PROBE] Request"
+                        << "title=" << probeApp.title
+                        << "uuid=" << probeApp.uuid
+                        << "url=" << probeUrl;
+
+                QNetworkRequest probeRequest = createRequest(probeUrl, false);
+                probeRequest.setRawHeader("User-Agent", "Artemis-Qt-IconProbe");
+
+                QNetworkReply* probeReply = m_nam.get(probeRequest);
+
+                connect(probeReply, &QNetworkReply::sslErrors, this,
+                        [probeTitle = probeApp.title, probeUuid = probeApp.uuid, probeUrl](const QList<QSslError>& errors) {
+                    QStringList errorTexts;
+                    for (const QSslError& err : errors) {
+                        errorTexts.append(err.errorString());
+                    }
+
+                    qWarning() << "[ICON-PROBE] SSL errors"
+                               << "title=" << probeTitle
+                               << "uuid=" << probeUuid
+                               << "url=" << probeUrl
+                               << "errors=" << errorTexts;
+                });
+
+                connect(probeReply, &QNetworkReply::finished, this,
+                        [probeReply,
+                         probeTitle = probeApp.title,
+                         probeUuid = probeApp.uuid,
+                         probeUrl]() {
+                    const int statusCode = probeReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    const QVariant redirectTarget = probeReply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+                    const QNetworkReply::NetworkError netError = probeReply->error();
+                    const QString netErrorText = probeReply->errorString();
+                    const QString contentType = probeReply->header(QNetworkRequest::ContentTypeHeader).toString();
+                    const QByteArray body = probeReply->readAll();
+
+                    if (netError == QNetworkReply::NoError) {
+                        qInfo() << "[ICON-PROBE] OK"
+                                << "title=" << probeTitle
+                                << "uuid=" << probeUuid
+                                << "status=" << statusCode
+                                << "contentType=" << contentType
+                                << "bytes=" << body.size()
+                                << "redirect=" << redirectTarget.toString()
+                                << "url=" << probeUrl;
+                    } else {
+                        qWarning() << "[ICON-PROBE] FAIL"
+                                   << "title=" << probeTitle
+                                   << "uuid=" << probeUuid
+                                   << "status=" << statusCode
+                                   << "errorCode=" << static_cast<int>(netError)
+                                   << "errorText=" << netErrorText
+                                   << "contentType=" << contentType
+                                   << "bytes=" << body.size()
+                                   << "redirect=" << redirectTarget.toString()
+                                   << "url=" << probeUrl;
+                    }
+
+                    probeReply->deleteLater();
+                });
+            }
+        }
+    });
+}
+
 // ============================================================================
 // Stream Management
 // ============================================================================
@@ -621,6 +1004,121 @@ void AirPCApiClient::launchStream(const QString& computerUuid, const QString& ap
         saveActiveSession(session);
 
         emit streamLaunched(response);
+    });
+}
+
+void AirPCApiClient::launchSharedPoolGame(const QString& gameUuid,
+                                          const QString& gameTitle,
+                                          const QString& fundingSource,
+                                          int subscriptionInstanceId)
+{
+    if (!isLoggedIn()) {
+        emit streamLaunchFailed("Not logged in");
+        return;
+    }
+
+    m_isLoading = true;
+    emit loadingChanged();
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/stream/launch");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject body;
+    body["game_uuid"] = gameUuid;
+    body["funding_source"] = fundingSource.isEmpty() ? "auto" : fundingSource;
+    body["device_id"] = getDeviceId();
+    if (subscriptionInstanceId > 0) {
+        body["subscription_instance_id"] = subscriptionInstanceId;
+    }
+
+    QJsonObject preferences;
+    preferences["audio_mode"] = "client";
+    preferences["enable_encryption"] = true;
+    body["preferences"] = preferences;
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, gameTitle]() {
+        m_isLoading = false;
+        emit loadingChanged();
+        reply->deleteLater();
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject json = doc.object();
+        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(0);
+
+        // Transport/network failure (no HTTP response)
+        if (reply->error() != QNetworkReply::NoError && statusCode == 0) {
+            QString error = reply->errorString();
+            if (json.contains("message")) {
+                error = json["message"].toString();
+            }
+            emit streamLaunchFailed(error);
+            return;
+        }
+
+        if (statusCode >= 400) {
+            QString error = json["message"].toString("Failed to launch game");
+            if (statusCode == 409 && json.contains("active_session")) {
+                AirPCStreamLaunchResponse active = parseSharedPoolSession(json["active_session"].toObject(), gameTitle);
+                if (!active.sessionId.isEmpty()) {
+                    saveActiveSession(toActiveSession(active));
+                }
+            }
+            emit streamLaunchFailed(error);
+            return;
+        }
+
+        if (!json["success"].toBool() || !json.contains("session")) {
+            emit streamLaunchFailed(json["message"].toString("Failed to launch game"));
+            return;
+        }
+
+        AirPCStreamLaunchResponse response = parseSharedPoolSession(json["session"].toObject(), gameTitle);
+        if (response.sessionId.isEmpty() || response.streamHost.isEmpty() || response.streamPort == 0) {
+            emit streamLaunchFailed("Invalid launch response from server");
+            return;
+        }
+
+        saveActiveSession(toActiveSession(response));
+        emit streamLaunched(response);
+    });
+}
+
+void AirPCApiClient::fetchSharedPoolActiveSession()
+{
+    if (!isLoggedIn()) {
+        clearActiveSession();
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/stream/active");
+    QNetworkReply* reply = m_nam.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "AirPCApiClient: Failed to fetch active shared-pool session:" << reply->errorString();
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject json = doc.object();
+
+        QJsonObject active = json["active_session"].toObject();
+        if (active.isEmpty()) {
+            clearActiveSession();
+            return;
+        }
+
+        AirPCStreamLaunchResponse response = parseSharedPoolSession(active);
+        if (response.sessionId.isEmpty()) {
+            clearActiveSession();
+            return;
+        }
+
+        saveActiveSession(toActiveSession(response));
     });
 }
 
@@ -810,7 +1308,293 @@ void AirPCApiClient::fetchProfile()
             AirPCUserProfile profile = AirPCUserProfile::fromJson(json);
             qInfo() << "AirPCApiClient: Profile loaded for" << profile.username;
             emit profileLoaded(profile.playtimeSeconds, profile.claimCount, profile.username, profile.email);
+
+            QVariantMap profileMap;
+            profileMap["account_id"] = profile.accountId;
+            profileMap["username"] = profile.username;
+            profileMap["email"] = profile.email;
+            profileMap["subscription_seconds"] = profile.subscriptionSeconds;
+            profileMap["playtime_seconds"] = profile.playtimeSeconds;
+            profileMap["claim_count"] = profile.claimCount;
+            profileMap["available_vouchers"] = profile.availableVouchers;
+            profileMap["active_voucher"] = profile.activeVoucher;
+            emit profileDataLoaded(profileMap);
         }
+    });
+}
+
+void AirPCApiClient::fetchBillingPurchases(int page, int pageSize)
+{
+    if (!isLoggedIn()) {
+        emit billingPurchasesReceived(QVariantList(), 0, page, false);
+        return;
+    }
+
+    QUrl url(m_apiBaseUrl + "/api/v1/billing/purchases");
+    QUrlQuery query;
+    query.addQueryItem("page", QString::number(page > 0 ? page : 1));
+    query.addQueryItem("page_size", QString::number(pageSize > 0 ? pageSize : 10));
+    url.setQuery(query);
+
+    QNetworkRequest request = createRequest(url.toString());
+    QNetworkReply* reply = m_nam.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, page]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QString error = reply->errorString();
+            QJsonDocument errorDoc = QJsonDocument::fromJson(reply->readAll());
+            if (errorDoc.isObject()) {
+                error = errorDoc.object()["message"].toString(error);
+            }
+            emit billingPurchasesFailed(error);
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+        QVariantList purchases;
+
+        if (!json["success"].toBool()) {
+            emit billingPurchasesFailed(json["message"].toString("Failed to fetch purchases"));
+            return;
+        }
+
+        for (const QJsonValue& value : json["purchases"].toArray()) {
+            purchases.append(value.toObject().toVariantMap());
+        }
+
+        int count = json["count"].toInt(purchases.size());
+        bool hasMore = json["has_more"].toBool(false);
+        int currentPage = json["page"].toInt(page);
+        emit billingPurchasesReceived(purchases, count, currentPage, hasMore);
+    });
+}
+
+void AirPCApiClient::fetchEntitlements()
+{
+    if (!isLoggedIn()) {
+        m_entitlements["subscriptionSeconds"] = 0;
+        m_entitlements["availableVouchers"] = 0;
+        m_entitlements["subscriptions"] = QVariantList();
+        m_entitlements["recommendedSubscriptionInstanceID"] = QVariant();
+        m_entitlements["activeVoucher"] = QVariant();
+        emit entitlementsChanged();
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/entitlements/me");
+    QNetworkReply* reply = m_nam.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "AirPCApiClient: Failed to fetch entitlements:" << reply->errorString();
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+
+        m_entitlements["subscriptionSeconds"] = json["subscription_seconds"].toInt(json["playtime_seconds"].toInt(0));
+        m_entitlements["availableVouchers"] = json["available_vouchers"].toInt(0);
+
+        QVariantList subscriptions;
+        for (const QJsonValue& value : json["subscriptions"].toArray()) {
+            subscriptions.append(value.toObject().toVariantMap());
+        }
+        m_entitlements["subscriptions"] = subscriptions;
+
+        if (json.contains("recommended_subscription_instance_id") && !json["recommended_subscription_instance_id"].isNull()) {
+            m_entitlements["recommendedSubscriptionInstanceID"] = json["recommended_subscription_instance_id"].toInt();
+        } else {
+            m_entitlements["recommendedSubscriptionInstanceID"] = QVariant();
+        }
+
+        if (json.contains("active_voucher") && json["active_voucher"].isObject()) {
+            m_entitlements["activeVoucher"] = json["active_voucher"].toObject().toVariantMap();
+        } else {
+            m_entitlements["activeVoucher"] = QVariant();
+        }
+
+        emit entitlementsChanged();
+    });
+}
+
+void AirPCApiClient::joinQueue(const QString& gameUuid,
+                               const QString& gameTitle,
+                               const QString& fundingSource,
+                               int subscriptionInstanceId)
+{
+    if (!isLoggedIn()) {
+        emit queueJoinFailed("Not logged in");
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/queue/join");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject body;
+    body["game_uuid"] = gameUuid;
+    body["game_title"] = gameTitle;
+    body["funding_source"] = fundingSource.isEmpty() ? "auto" : fundingSource;
+    if (subscriptionInstanceId > 0) {
+        body["subscription_instance_id"] = subscriptionInstanceId;
+    }
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, gameUuid, gameTitle]() {
+        reply->deleteLater();
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QString error = json["message"].toString(reply->errorString());
+            emit queueJoinFailed(error);
+            return;
+        }
+
+        int position = json["position"].toInt(0);
+        m_queueState["inQueue"] = true;
+        m_queueState["status"] = QString("waiting");
+        m_queueState["position"] = position;
+        m_queueState["gameUuid"] = gameUuid;
+        m_queueState["gameTitle"] = gameTitle;
+        m_queueState["claimToken"] = QString();
+        m_queueState["expiresInSeconds"] = 0;
+        emit queueStateChanged();
+        emit queueJoinSucceeded(position, gameTitle);
+    });
+}
+
+void AirPCApiClient::leaveQueue()
+{
+    if (!isLoggedIn()) {
+        emit queueJoinFailed("Not logged in");
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/queue/leave");
+    QNetworkReply* reply = m_nam.sendCustomRequest(request, "DELETE");
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            QJsonObject json = doc.object();
+            emit queueJoinFailed(json["message"].toString(reply->errorString()));
+            return;
+        }
+
+        m_queueState["inQueue"] = false;
+        m_queueState["status"] = QString("not_in_queue");
+        m_queueState["position"] = 0;
+        m_queueState["gameUuid"] = QString();
+        m_queueState["gameTitle"] = QString();
+        m_queueState["claimToken"] = QString();
+        m_queueState["expiresInSeconds"] = 0;
+        emit queueStateChanged();
+        emit queueLeft();
+    });
+}
+
+void AirPCApiClient::fetchQueueStatus()
+{
+    if (!isLoggedIn()) {
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/queue/status");
+    QNetworkReply* reply = m_nam.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+
+        QString status = json["status"].toString("not_in_queue");
+        if (status == "waiting" || status == "notified") {
+            m_queueState["inQueue"] = true;
+            m_queueState["status"] = status;
+            m_queueState["position"] = json["position"].toInt(0);
+            m_queueState["gameUuid"] = json["game_uuid"].toString();
+            m_queueState["gameTitle"] = json["game_title"].toString();
+            m_queueState["claimToken"] = json["claim_token"].toString();
+            m_queueState["expiresInSeconds"] = json["expires_in_seconds"].toInt(0);
+        } else {
+            m_queueState["inQueue"] = false;
+            m_queueState["status"] = QString("not_in_queue");
+            m_queueState["position"] = 0;
+            m_queueState["gameUuid"] = QString();
+            m_queueState["gameTitle"] = QString();
+            m_queueState["claimToken"] = QString();
+            m_queueState["expiresInSeconds"] = 0;
+        }
+
+        emit queueStateChanged();
+    });
+}
+
+void AirPCApiClient::claimQueue(const QString& claimToken,
+                                const QString& fundingSource,
+                                int subscriptionInstanceId)
+{
+    if (!isLoggedIn()) {
+        emit queueClaimFailed("Not logged in");
+        return;
+    }
+
+    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/queue/claim");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject body;
+    body["claim_token"] = claimToken;
+    body["funding_source"] = fundingSource.isEmpty() ? "auto" : fundingSource;
+    if (subscriptionInstanceId > 0) {
+        body["subscription_instance_id"] = subscriptionInstanceId;
+    }
+
+    QNetworkReply* reply = m_nam.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject json = doc.object();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            emit queueClaimFailed(json["message"].toString(reply->errorString()));
+            return;
+        }
+
+        if (!json["success"].toBool() || !json.contains("session")) {
+            emit queueClaimFailed(json["message"].toString("Failed to claim PC"));
+            return;
+        }
+
+        AirPCStreamLaunchResponse response = parseSharedPoolSession(json["session"].toObject());
+        if (response.sessionId.isEmpty()) {
+            emit queueClaimFailed("Invalid claim response");
+            return;
+        }
+
+        saveActiveSession(toActiveSession(response));
+
+        m_queueState["inQueue"] = false;
+        m_queueState["status"] = QString("not_in_queue");
+        m_queueState["position"] = 0;
+        m_queueState["gameUuid"] = QString();
+        m_queueState["gameTitle"] = QString();
+        m_queueState["claimToken"] = QString();
+        m_queueState["expiresInSeconds"] = 0;
+        emit queueStateChanged();
+
+        emit queueClaimSucceeded();
+        emit streamLaunched(response);
     });
 }
 

@@ -37,7 +37,10 @@ public:
         PortRole,
         ImageUrlRole,
         HdrSupportedRole,
-        PlaytimeRole
+        PlaytimeRole,
+        AvailableCountRole,
+        OnlineCountRole,
+        StatusRole
     };
 
     explicit AirPCGameModel(QObject* parent = nullptr);
@@ -69,6 +72,11 @@ signals:
     void streamEnded(const QString& reason);
     void streamError(const QString& error);
     void sessionCreated(const QString& appName, Session* session);
+    void queueStateChanged();
+    void queueJoinSucceeded(int position, const QString& gameTitle);
+    void queueJoinFailed(const QString& error);
+    void queueClaimSucceeded();
+    void queueClaimFailed(const QString& error);
 
 private slots:
     void onAppsLoaded(const QList<AirPCPublicApp>& apps);
@@ -99,6 +107,7 @@ class AirPCGameSortFilterModel : public QSortFilterProxyModel
     Q_OBJECT
 
     Q_PROPERTY(QString filterText READ filterText WRITE setFilterText NOTIFY filterTextChanged)
+    Q_PROPERTY(QString filterStatus READ filterStatus WRITE setFilterStatus NOTIFY filterStatusChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
@@ -106,12 +115,15 @@ public:
 
     QString filterText() const { return m_filterText; }
     void setFilterText(const QString& text);
+    QString filterStatus() const { return m_filterStatus; }
+    void setFilterStatus(const QString& status);
     int count() const { return rowCount(); }
 
     Q_INVOKABLE void launchGame(int index);
 
 signals:
     void filterTextChanged();
+    void filterStatusChanged();
     void countChanged();
 
 protected:
@@ -119,4 +131,5 @@ protected:
 
 private:
     QString m_filterText;
+    QString m_filterStatus = "all";
 };

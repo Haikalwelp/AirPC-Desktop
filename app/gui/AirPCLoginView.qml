@@ -23,6 +23,22 @@ FocusScope {
     readonly property color inputBackgroundHover: Qt.rgba(1, 1, 1, 0.08)
     readonly property color inputBackgroundFocus: Qt.rgba(1, 1, 1, 0.1)
     readonly property color borderDefault: Qt.rgba(69/255, 69/255, 69/255, 0.3)
+
+    // Responsive breakpoints based on window height
+    readonly property bool isCompact: height < 500
+    readonly property bool isMedium: height >= 500 && height < 700
+    // isFull: height >= 700 (default)
+
+    // Responsive tokens — all layout values derived from window size
+    readonly property int cardPadding:    isCompact ? 20 : isMedium ? 26 : 32
+    readonly property int cardSpacing:    isCompact ? 12 : isMedium ? 18 : 24
+    readonly property int formSpacing:    isCompact ? 12 : isMedium ? 16 : 20
+    readonly property int iconSize:       isCompact ? 48 : isMedium ? 60 : 72
+    readonly property int titleFontSize:  isCompact ? 22 : isMedium ? 27 : 32
+    readonly property int subtitleFontSize: isCompact ? 12 : isMedium ? 13 : 14
+    readonly property int inputHeight:    isCompact ? 44 : isMedium ? 50 : 56
+    readonly property int buttonHeight:   isCompact ? 42 : isMedium ? 48 : 54
+    readonly property int cardMaxWidth:   Math.min(parent.width * 0.92, 420)
     
     // Signals for integration
     signal loginRequested(string username, string password, bool rememberMe)
@@ -46,55 +62,69 @@ FocusScope {
         }
     }
 
-    // Login Card with entrance animation
-    Rectangle {
-        id: loginCard
-        width: Math.min(parent.width * 0.9, 420)
-        height: Math.min(parent.height * 0.95, contentLayout.implicitHeight + 64)
-        anchors.centerIn: parent
-        
-        // Glassmorphism effect
-        color: root.cardBackground
-        radius: 20
-        border.color: Qt.rgba(1, 1, 1, 0.3)
-        border.width: 1.5
-        
-        // Entrance animation
-        opacity: 0
-        scale: 0.95
-        
-        Component.onCompleted: {
-            entranceAnimation.start()
-        }
-        
-        ParallelAnimation {
-            id: entranceAnimation
-            NumberAnimation { target: loginCard; property: "opacity"; to: 1; duration: 400; easing.type: Easing.OutCubic }
-            NumberAnimation { target: loginCard; property: "scale"; to: 1; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 1.02 }
-        }
+    // Flickable wrapper — enables scrolling when window is shorter than the card
+    Flickable {
+        id: scroller
+        anchors.fill: parent
+        clip: true
+        flickableDirection: Flickable.AutoFlickIfNeeded
+        // Content is always as wide as the viewport; height grows to fit the card
+        contentWidth: width
+        contentHeight: Math.max(height, loginCard.height + 48)
+        // Disable interactive flick on large windows where card fits
+        interactive: contentHeight > height
 
-        // Shadow removed (flat login form)
-        layer.enabled: false
+        // Login Card with entrance animation
+        Rectangle {
+            id: loginCard
+            width: root.cardMaxWidth
+            height: contentLayout.implicitHeight + root.cardPadding * 2
+            // Horizontally centered, vertically centered within the taller of card/viewport
+            x: (scroller.contentWidth - width) / 2
+            y: Math.max(24, (scroller.contentHeight - height) / 2)
 
-        // Content
-        ColumnLayout {
-            id: contentLayout
-            anchors.fill: parent
-            anchors.margins: 32
-            spacing: 24
+            // Glassmorphism effect
+            color: root.cardBackground
+            radius: 20
+            border.color: Qt.rgba(1, 1, 1, 0.3)
+            border.width: 1.5
 
-            // Header Section
+            // Entrance animation
+            opacity: 0
+            scale: 0.95
+
+            Component.onCompleted: {
+                entranceAnimation.start()
+            }
+
+            ParallelAnimation {
+                id: entranceAnimation
+                NumberAnimation { target: loginCard; property: "opacity"; to: 1; duration: 400; easing.type: Easing.OutCubic }
+                NumberAnimation { target: loginCard; property: "scale"; to: 1; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 1.02 }
+            }
+
+            // Shadow removed (flat login form)
+            layer.enabled: false
+
+            // Content
             ColumnLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 16
-                
-                // Icon Wrapper with hover effect
-                Rectangle {
-                    id: iconWrapper
+                id: contentLayout
+                anchors.fill: parent
+                anchors.margins: root.cardPadding
+                spacing: root.cardSpacing
+
+                // Header Section
+                ColumnLayout {
                     Layout.alignment: Qt.AlignHCenter
-                    width: 72
-                    height: 72
-                    radius: 36
+                    spacing: root.isCompact ? 8 : 16
+
+                    // Icon Wrapper with hover effect
+                    Rectangle {
+                        id: iconWrapper
+                        Layout.alignment: Qt.AlignHCenter
+                        implicitWidth: root.iconSize
+                        implicitHeight: root.iconSize
+                        radius: root.iconSize / 2
                     color: Qt.rgba(root.primaryColor.r, root.primaryColor.g, root.primaryColor.b, 0.12)
                     
                     Behavior on color { ColorAnimation { duration: 200 } }
@@ -103,8 +133,8 @@ FocusScope {
                     Image {
                         id: iconImage
                         source: "qrc:/res/ic_videogame_asset_white_48px.svg"
-                        width: 36
-                        height: 36
+                        width: root.iconSize * 0.5
+                        height: root.iconSize * 0.5
                         anchors.centerIn: parent
                         visible: false
                     }
@@ -125,35 +155,36 @@ FocusScope {
                     }
                 }
 
-                // Title & Subtitle
+                // Title & Subtitle — hidden in compact to save vertical space
                 ColumnLayout {
                     spacing: 8
                     Layout.alignment: Qt.AlignHCenter
-                    
+                    visible: !root.isCompact
+
                     Text {
                         text: "AirPC Desktop"
                         font.family: "Montserrat"
-                        font.pixelSize: 32
+                        font.pixelSize: root.titleFontSize
                         font.weight: Font.Bold
                         font.letterSpacing: 0.5
                         color: "#FFFFFF"
                         style: Text.Outline
                         styleColor: Qt.rgba(0, 0, 0, 0.12)
                         Layout.alignment: Qt.AlignHCenter
-                        
+
                         // Accessible
                         Accessible.role: Accessible.Heading
                         Accessible.name: text
                     }
-                    
+
                     Text {
                         text: "Sign in to start streaming"
                         font.family: "Montserrat"
-                        font.pixelSize: 14
+                        font.pixelSize: root.subtitleFontSize
                         font.weight: Font.Normal
                         color: Qt.rgba(1, 1, 1, 0.9)
                         Layout.alignment: Qt.AlignHCenter
-                        
+
                         Accessible.role: Accessible.StaticText
                         Accessible.name: text
                     }
@@ -163,7 +194,7 @@ FocusScope {
             // Form Section
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 20
+                spacing: root.formSpacing
 
                 // Username Field
                 ColumnLayout {
@@ -181,8 +212,8 @@ FocusScope {
                     // Custom input wrapper to avoid Material floating label
                     Item {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 56
-                        
+                        Layout.preferredHeight: root.inputHeight
+
                         Rectangle {
                             id: usernameBg
                             anchors.fill: parent
@@ -262,8 +293,8 @@ FocusScope {
                     // Custom input wrapper to avoid Material floating label
                     Item {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 56
-                        
+                        Layout.preferredHeight: root.inputHeight
+
                         Rectangle {
                             id: passwordBg
                             anchors.fill: parent
@@ -518,7 +549,7 @@ FocusScope {
                             }
                         }
                         
-                        onClicked: root.forgotPasswordRequested()
+                        onClicked: App.Router.push("forgot-password")
                         
                         HoverHandler {
                             cursorShape: Qt.PointingHandCursor
@@ -601,8 +632,8 @@ FocusScope {
             Button {
                 id: loginBtn
                 Layout.fillWidth: true
-                Layout.preferredHeight: 54
-                Layout.topMargin: 8
+                Layout.preferredHeight: root.buttonHeight
+                Layout.topMargin: root.isCompact ? 4 : 8
                 enabled: !root.loading
                 
                 // Accessible
@@ -632,9 +663,10 @@ FocusScope {
                         Canvas {
                             id: spinnerArc
                             anchors.fill: parent
-                            
-                            property real rotation: 0
-                            
+
+                            // arcAngle drives the spinner; animated via a Timer+property
+                            property real arcAngle: 0
+
                             onPaint: {
                                 var ctx = getContext("2d")
                                 ctx.clearRect(0, 0, width, height)
@@ -642,21 +674,20 @@ FocusScope {
                                 ctx.lineWidth = 2.5
                                 ctx.lineCap = "round"
                                 ctx.beginPath()
-                                var startAngle = rotation * Math.PI / 180
+                                var startAngle = arcAngle * Math.PI / 180
                                 var endAngle = startAngle + Math.PI * 0.75
                                 ctx.arc(width/2, height/2, width/2 - 2, startAngle, endAngle)
                                 ctx.stroke()
                             }
-                            
-                            NumberAnimation on rotation {
-                                from: 0
-                                to: 360
-                                duration: 1000
-                                loops: Animation.Infinite
+
+                            onArcAngleChanged: requestPaint()
+
+                            Timer {
+                                interval: 16
+                                repeat: true
                                 running: root.loading
+                                onTriggered: spinnerArc.arcAngle = (spinnerArc.arcAngle + 6) % 360
                             }
-                            
-                            onRotationChanged: requestPaint()
                         }
                     }
                     
@@ -664,7 +695,7 @@ FocusScope {
                         text: root.loading ? "Logging in..." : "Sign In"
                         font.family: "Montserrat"
                         font.pixelSize: 16
-                        font.weight: Font.SemiBold
+                        font.weight: Font.DemiBold
                         font.letterSpacing: 0.3
                         color: "#FFFFFF"
                         horizontalAlignment: Text.AlignHCenter
@@ -715,7 +746,7 @@ FocusScope {
             // Sign Up Section
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: 12
+                Layout.topMargin: root.isCompact ? 4 : 12
                 spacing: 4
                 
                 Text {
@@ -760,7 +791,7 @@ FocusScope {
                         }
                     }
                     
-                    onClicked: root.signupRequested()
+                    onClicked: App.Router.push("signup")
                     
                     HoverHandler {
                         cursorShape: Qt.PointingHandCursor
@@ -769,8 +800,9 @@ FocusScope {
                     Keys.onTabPressed: usernameInput.forceActiveFocus()
                 }
             }
-        }
-    }
+        } // end contentLayout ColumnLayout
+    } // end loginCard Rectangle
+} // end Flickable
 
     // Keyboard shortcuts
     Shortcut {
@@ -816,3 +848,4 @@ FocusScope {
         }
     }
 }
+

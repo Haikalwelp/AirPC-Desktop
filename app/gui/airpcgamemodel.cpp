@@ -15,6 +15,11 @@ AirPCGameModel::AirPCGameModel(QObject* parent)
     connect(m_api, &AirPCApiClient::streamLaunchFailed, this, &AirPCGameModel::onStreamLaunchFailed);
     connect(m_api, &AirPCApiClient::loadingChanged, this, &AirPCGameModel::loadingChanged);
     connect(m_api, &AirPCApiClient::errorOccurred, this, &AirPCGameModel::errorChanged);
+    connect(m_api, &AirPCApiClient::queueStateChanged, this, &AirPCGameModel::queueStateChanged);
+    connect(m_api, &AirPCApiClient::queueJoinSucceeded, this, &AirPCGameModel::queueJoinSucceeded);
+    connect(m_api, &AirPCApiClient::queueJoinFailed, this, &AirPCGameModel::queueJoinFailed);
+    connect(m_api, &AirPCApiClient::queueClaimSucceeded, this, &AirPCGameModel::queueClaimSucceeded);
+    connect(m_api, &AirPCApiClient::queueClaimFailed, this, &AirPCGameModel::queueClaimFailed);
     
     // Forward stream bridge signals to QML
     connect(m_streamBridge, &AirPCStreamBridge::streamStarted,
@@ -59,11 +64,35 @@ QVariant AirPCGameModel::data(const QModelIndex& index, int role) const
     case PortRole:
         return game.port;
     case ImageUrlRole:
-        return game.getImageUrl(m_api->authToken(), m_api->apiBaseUrl());
+    {
+        const QString url = game.getImageUrl(m_api->authToken(), m_api->apiBaseUrl());
+        static int s_imageRoleLogBudget = 30;
+        if (s_imageRoleLogBudget > 0) {
+            qInfo() << "[ICON-DATA] ImageUrlRole"
+                    << "row=" << index.row()
+                    << "title=" << game.title
+                    << "uuid=" << game.uuid
+                    << "url=" << url;
+            --s_imageRoleLogBudget;
+        }
+        return url;
+    }
     case HdrSupportedRole:
         return game.hdrSupported;
     case PlaytimeRole:
         return game.playtimeSeconds;
+    case AvailableCountRole:
+        return game.availableCount;
+    case OnlineCountRole:
+        return game.onlineCount;
+    case StatusRole:
+        if (game.availableCount > 0) {
+            return QString("ready");
+        }
+        if (game.onlineCount > 0) {
+            return QString("busy");
+        }
+        return QString("offline");
     default:
         return QVariant();
     }
@@ -82,6 +111,9 @@ QHash<int, QByteArray> AirPCGameModel::roleNames() const
     roles[ImageUrlRole] = "imageUrl";
     roles[HdrSupportedRole] = "hdrSupported";
     roles[PlaytimeRole] = "playtimeSeconds";
+    roles[AvailableCountRole] = "availableCount";
+    roles[OnlineCountRole] = "onlineCount";
+    roles[StatusRole] = "status";
     return roles;
 }
 
@@ -98,7 +130,10 @@ QString AirPCGameModel::errorMessage() const
 void AirPCGameModel::refresh()
 {
     qInfo() << "AirPCGameModel: Refreshing game list...";
-    m_api->fetchAllocations();
+    m_api->fetchCatalogGames();
+    m_api->fetchSharedPoolActiveSession();
+    m_api->fetchEntitlements();
+    m_api->fetchQueueStatus();
 }
 
 void AirPCGameModel::launchGame(int index)
@@ -116,8 +151,8 @@ void AirPCGameModel::launchGame(int index)
     m_pendingLaunch.appId = game.id;
     m_pendingLaunch.appName = game.title;
     m_pendingLaunch.valid = true;
-    
-    m_api->launchStream(game.computerUuid, game.id, game.uuid);
+
+    m_api->launchSharedPoolGame(game.uuid, game.title, "auto", 0);
 }
 
 void AirPCGameModel::launchGameById(const QString& computerUuid, const QString& appId)
@@ -141,12 +176,53 @@ void AirPCGameModel::launchGameById(const QString& computerUuid, const QString& 
     m_pendingLaunch.appName = appName;
     m_pendingLaunch.valid = true;
 
-    m_api->launchStream(computerUuid, appId, appUuid);
+    if (!appUuid.isEmpty()) {
+        m_api->launchSharedPoolGame(appUuid, appName, "auto", 0);
+    } else {
+        emit launchFailed("Could not determine game UUID for launch");
+    }
 }
 
 void AirPCGameModel::onAppsLoaded(const QList<AirPCPublicApp>& apps)
 {
     qInfo() << "AirPCGameModel: Received" << apps.size() << "games";
+
+    int catalogCount = 0;
+    int emptyUuidCount = 0;
+    int emptyImageUrlCount = 0;
+    int sampleLogged = 0;
+
+    for (const AirPCPublicApp& app : apps) {
+        if (!app.isCatalog) {
+            continue;
+        }
+
+        catalogCount++;
+        if (app.uuid.trimmed().isEmpty()) {
+            emptyUuidCount++;
+        }
+
+        const QString imageUrl = app.getImageUrl(m_api->authToken(), m_api->apiBaseUrl());
+        if (imageUrl.trimmed().isEmpty()) {
+            emptyImageUrlCount++;
+        }
+
+        if (sampleLogged < 8) {
+            qInfo() << "[ICON-DEBUG] Catalog game"
+                    << "title=" << app.title
+                    << "uuid=" << app.uuid
+                    << "available=" << app.availableCount
+                    << "online=" << app.onlineCount
+                    << "imageUrl=" << imageUrl;
+            sampleLogged++;
+        }
+    }
+
+    qInfo() << "[ICON-DEBUG] Catalog summary"
+            << "catalogCount=" << catalogCount
+            << "emptyUuid=" << emptyUuidCount
+            << "emptyImageUrl=" << emptyImageUrlCount
+            << "apiBaseUrl=" << m_api->apiBaseUrl();
 
     beginResetModel();
     m_games = apps;
@@ -197,6 +273,7 @@ void AirPCGameModel::onStreamLaunched(const AirPCStreamLaunchResponse& response)
 void AirPCGameModel::onStreamLaunchFailed(const QString& error)
 {
     qWarning() << "AirPCGameModel: Stream launch failed:" << error;
+    m_pendingLaunch.valid = false;
     emit launchFailed(error);
 }
 
@@ -227,15 +304,33 @@ void AirPCGameSortFilterModel::setFilterText(const QString& text)
     }
 }
 
-bool AirPCGameSortFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
+void AirPCGameSortFilterModel::setFilterStatus(const QString& status)
 {
-    if (m_filterText.isEmpty()) {
-        return true;
+    QString normalized = status.toLower();
+    if (normalized != "all" && normalized != "ready") {
+        normalized = "all";
     }
 
+    if (m_filterStatus != normalized) {
+        m_filterStatus = normalized;
+        invalidateFilter();
+        emit filterStatusChanged();
+        emit countChanged();
+    }
+}
+
+bool AirPCGameSortFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
+{
     QModelIndex index = sourceModel()->index(sourceRow, 0, sourceParent);
     QString title = sourceModel()->data(index, AirPCGameModel::TitleRole).toString();
-    return title.contains(m_filterText, Qt::CaseInsensitive);
+    bool matchesText = m_filterText.isEmpty() || title.contains(m_filterText, Qt::CaseInsensitive);
+
+    if (m_filterStatus == "ready") {
+        int available = sourceModel()->data(index, AirPCGameModel::AvailableCountRole).toInt();
+        return matchesText && available > 0;
+    }
+
+    return matchesText;
 }
 
 void AirPCGameSortFilterModel::launchGame(int index)

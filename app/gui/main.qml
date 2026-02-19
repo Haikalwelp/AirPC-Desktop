@@ -140,14 +140,14 @@ ApplicationWindow {
         }
 
         Keys.onMenuPressed: {
-            settingsButton.clicked()
+            // Settings button removed; no-op
         }
 
         // This is a keypress we've reserved for letting the
         // SdlGamepadKeyNavigation object tell us to show settings
         // when Menu is consumed by a focused control.
         Keys.onHangupPressed: {
-            settingsButton.clicked()
+            // Settings button removed; no-op
         }
     }
 
@@ -167,7 +167,7 @@ ApplicationWindow {
         id: inactivityTimer
         interval: 5 * 60000
         onTriggered: {
-            if (!active && pollingActive) {
+            if (!window.active && window.pollingActive) {
                 ComputerManager.stopPollingAsync()
                 pollingActive = false
             }
@@ -343,8 +343,8 @@ ApplicationWindow {
             // User section separator and content (visible only when logged in)
             Rectangle {
                 visible: AirPCApiClient.isLoggedIn
-                width: 1.5
-                height: 28
+                Layout.preferredWidth: 1.5
+                Layout.preferredHeight: 28
                 color: Qt.rgba(69/255, 69/255, 69/255, 0.15)
                 Layout.alignment: Qt.AlignVCenter
             }
@@ -459,56 +459,7 @@ ApplicationWindow {
                 }
             }
 
-            // Help button (always visible)
-            NavigableToolButton {
-                id: helpButton
-                visible: SystemProperties.hasBrowser
 
-                iconSource: "qrc:/res/question_mark.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Help") + (helpShortcut.nativeText ? (" ("+helpShortcut.nativeText+")") : "")
-
-                Shortcut {
-                    id: helpShortcut
-                    sequence: StandardKey.HelpContents
-                    onActivated: helpButton.clicked()
-                }
-
-                // TODO need to make sure browser is brought to foreground.
-                onClicked: Qt.openUrlExternally("https://github.com/wjbeckett/artemis/wiki/Setup-Guide");
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            // Settings button (fallback, visible only when NOT logged in)
-            NavigableToolButton {
-                id: settingsButton
-                visible: !AirPCApiClient.isLoggedIn
-
-                iconSource: "qrc:/res/settings.svg"
-
-                onClicked: navigateTo("qrc:/gui/SettingsView.qml", "SettingsView")
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-
-                Shortcut {
-                    id: settingsShortcut
-                    sequence: StandardKey.Preferences
-                    onActivated: settingsButton.clicked()
-                }
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Settings") + (settingsShortcut.nativeText ? (" ("+settingsShortcut.nativeText+")") : "")
-            }
         }
     }
 

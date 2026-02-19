@@ -24,6 +24,8 @@
         <file>gui/QuickMenu.qml</file>
         <file>gui/Toast.qml</file>
         <file>gui/AirPCLoginView.qml</file>
+        <file>gui/AirPCForgotPasswordView.qml</file>
+        <file>gui/AirPCSignupView.qml</file>
         <file>gui/AirPCPublicGamesView.qml</file>
         <file>gui/AirPCShellView.qml</file>
         <file>gui/Router.qml</file>

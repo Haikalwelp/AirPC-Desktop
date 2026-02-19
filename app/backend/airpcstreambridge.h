@@ -107,6 +107,8 @@ private:
      */
     NvComputer* createSyntheticComputer(const AirPCStreamLaunchResponse& response);
 
+    NvComputer* createFallbackComputer(const AirPCStreamLaunchResponse& response) const;
+
     /**
      * Create an NvApp with the given name and id.
      */

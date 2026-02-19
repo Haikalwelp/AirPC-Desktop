@@ -6,12 +6,18 @@
 #include <QMutex>
 #include <QtDebug>
 #include <QNetworkProxyFactory>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
 #include <QElapsedTimer>
 #include <QTemporaryFile>
 #include <QRegularExpression>
+#include <QQmlNetworkAccessManagerFactory>
+#include <QSslError>
+#include <QUrl>
 
 // Don't let SDL hook our main function, since Qt is already
 // doing the same thing. This needs to be before any headers
@@ -79,6 +85,89 @@ static const uint64_t k_MaxLogSizeBytes = 10 * 1024 * 1024;
 static QAtomicInteger<uint64_t> s_LogBytesWritten = 0;
 static QFile* s_LoggerFile;
 #endif
+
+static bool isCatalogIconRequestUrl(const QUrl& url)
+{
+    const QString path = url.path();
+    return path.contains("/api/v1/catalog/games/") && path.endsWith("/icon");
+}
+
+class DebugQmlNetworkAccessManager final : public QNetworkAccessManager
+{
+public:
+    explicit DebugQmlNetworkAccessManager(QObject* parent = nullptr)
+        : QNetworkAccessManager(parent)
+    {
+    }
+
+protected:
+    QNetworkReply* createRequest(Operation op, const QNetworkRequest& originalReq, QIODevice* outgoingData) override
+    {
+        QNetworkRequest request(originalReq);
+        const QUrl url = request.url();
+        const bool catalogIconRequest = isCatalogIconRequestUrl(url);
+
+        if (catalogIconRequest && !request.hasRawHeader("User-Agent")) {
+            request.setRawHeader("User-Agent", "Artemis-QML-Image");
+        }
+
+        QNetworkReply* reply = QNetworkAccessManager::createRequest(op, request, outgoingData);
+
+        if (catalogIconRequest) {
+            qInfo() << "[QML-NET] Request"
+                    << "op=" << op
+                    << "url=" << url.toString();
+
+            connect(reply, &QNetworkReply::sslErrors, this,
+                    [url](const QList<QSslError>& errors) {
+                QStringList messages;
+                for (const QSslError& err : errors) {
+                    messages.append(err.errorString());
+                }
+
+                qWarning() << "[QML-NET] SSL errors"
+                           << "url=" << url.toString()
+                           << "errors=" << messages;
+            });
+
+            connect(reply, &QNetworkReply::finished, this,
+                    [reply, url]() {
+                const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const auto err = reply->error();
+                const QString errText = reply->errorString();
+                const QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+                const QString contentLength = reply->header(QNetworkRequest::ContentLengthHeader).toString();
+
+                if (err == QNetworkReply::NoError) {
+                    qInfo() << "[QML-NET] OK"
+                            << "status=" << status
+                            << "contentType=" << contentType
+                            << "contentLength=" << contentLength
+                            << "url=" << url.toString();
+                } else {
+                    qWarning() << "[QML-NET] FAIL"
+                               << "status=" << status
+                               << "errorCode=" << static_cast<int>(err)
+                               << "errorText=" << errText
+                               << "contentType=" << contentType
+                               << "contentLength=" << contentLength
+                               << "url=" << url.toString();
+                }
+            });
+        }
+
+        return reply;
+    }
+};
+
+class DebugQmlNetworkAccessManagerFactory final : public QQmlNetworkAccessManagerFactory
+{
+public:
+    QNetworkAccessManager* create(QObject* parent) override
+    {
+        return new DebugQmlNetworkAccessManager(parent);
+    }
+};
 
 class LoggerTask : public QRunnable
 {
@@ -782,6 +871,8 @@ int main(int argc, char *argv[])
     }
 
     QQmlApplicationEngine engine;
+    engine.setNetworkAccessManagerFactory(new DebugQmlNetworkAccessManagerFactory());
+
     QString initialView;
     bool hasGUI = true;
 
