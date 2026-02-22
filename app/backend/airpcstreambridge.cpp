@@ -5,9 +5,10 @@
 #include "playtimemanager.h"
 #include "../streaming/session.h"
 #include "../settings/streamingpreferences.h"
-
 #include <QDebug>
 #include <QSysInfo>
+#include <QtConcurrent>
+#include <QFutureWatcher>
 
 // Static singleton instance
 static AirPCStreamBridge* s_instance = nullptr;
@@ -79,52 +80,63 @@ void AirPCStreamBridge::launchFromApiResponse(
     // Store the app name for later use
     m_currentAppName = appName;
     
-    // Create synthetic computer from API response
-    m_syntheticComputer = createSyntheticComputer(response);
-    if (!m_syntheticComputer) {
-        QString error = tr("Stream launch failed: Could not create computer configuration");
-        qWarning() << "AirPCStreamBridge:" << error;
-        emit launchError(error);
-        return;
-    }
-    
-    // Create the app object
-    NvApp app = createApp(appName, appId);
-    
-    // Get streaming preferences (use defaults if not available)
-    StreamingPreferences* prefs = StreamingPreferences::get();
-    
-    // Create the session
-    m_currentSession = new Session(m_syntheticComputer, app, prefs);
-    
-    // Connect session signals to our slots
-    connect(m_currentSession, &Session::stageStarting,
-            this, &AirPCStreamBridge::onSessionStageStarting);
-    connect(m_currentSession, &Session::stageFailed,
-            this, &AirPCStreamBridge::onSessionStageFailed);
-    connect(m_currentSession, &Session::displayLaunchError,
-            this, &AirPCStreamBridge::onSessionDisplayLaunchError);
-    connect(m_currentSession, &Session::sessionFinished,
-            this, &AirPCStreamBridge::onSessionFinished);
-    connect(m_currentSession, &Session::readyForDeletion,
-            this, &AirPCStreamBridge::onSessionReadyForDeletion);
-    
-    qInfo() << "AirPCStreamBridge: Session created, emitting sessionCreated signal";
-    
-    // Store session info for playtime tracking
-    m_currentSessionToken = response.sessionToken;
-    m_currentPlaytimeSeconds = response.playtimeSeconds;
-    
-    // Emit the session for QML to use (follows the pattern from startstream.cpp)
-    // The QML side will call session.exec(window) to actually start streaming
-    emit sessionCreated(appName, m_currentSession);
-    emit streamStarted();
-    
-    // Start playtime tracking if we have a PlaytimeManager and playtime available
-    if (m_playtimeManager && m_currentPlaytimeSeconds > 0) {
-        qInfo() << "AirPCStreamBridge: Starting playtime tracking with" << m_currentPlaytimeSeconds << "seconds";
-        m_playtimeManager->startSession(m_currentSessionToken, m_currentPlaytimeSeconds);
-    }
+    // Create synthetic computer from API response asynchronously so we don't block the UI
+    QFutureWatcher<NvComputer*>* watcher = new QFutureWatcher<NvComputer*>(this);
+    connect(watcher, &QFutureWatcher<NvComputer*>::finished, this, [this, appName, appId, response, watcher]() {
+        m_syntheticComputer = watcher->result();
+        watcher->deleteLater();
+
+        if (!m_syntheticComputer) {
+            QString error = tr("Stream launch failed: Could not create computer configuration");
+            qWarning() << "AirPCStreamBridge:" << error;
+            emit launchError(error);
+            return;
+        }
+        
+        // Create the app object
+        NvApp app = createApp(appName, appId);
+        
+        // Get streaming preferences (use defaults if not available)
+        StreamingPreferences* prefs = StreamingPreferences::get();
+        
+        // Create the session
+        m_currentSession = new Session(m_syntheticComputer, app, prefs);
+        
+        // Connect session signals to our slots
+        connect(m_currentSession, &Session::stageStarting,
+                this, &AirPCStreamBridge::onSessionStageStarting);
+        connect(m_currentSession, &Session::stageFailed,
+                this, &AirPCStreamBridge::onSessionStageFailed);
+        connect(m_currentSession, &Session::displayLaunchError,
+                this, &AirPCStreamBridge::onSessionDisplayLaunchError);
+        connect(m_currentSession, &Session::sessionFinished,
+                this, &AirPCStreamBridge::onSessionFinished);
+        connect(m_currentSession, &Session::readyForDeletion,
+                this, &AirPCStreamBridge::onSessionReadyForDeletion);
+        
+        qInfo() << "AirPCStreamBridge: Session created, emitting sessionCreated signal";
+        
+        // Store session info for playtime tracking
+        m_currentSessionToken = response.sessionToken;
+        m_currentPlaytimeSeconds = response.playtimeSeconds;
+        
+        // Emit the session for QML to use (follows the pattern from startstream.cpp)
+        // The QML side will call session.exec(window) to actually start streaming
+        emit sessionCreated(appName, m_currentSession);
+        emit streamStarted();
+        
+        // Start playtime tracking if we have a PlaytimeManager and playtime available
+        if (m_playtimeManager && m_currentPlaytimeSeconds > 0) {
+            qInfo() << "AirPCStreamBridge: Starting playtime tracking with" << m_currentPlaytimeSeconds << "seconds";
+            m_playtimeManager->startSession(m_currentSessionToken, m_currentPlaytimeSeconds);
+        }
+    });
+
+    // Run the network request in a background thread
+    QFuture<NvComputer*> future = QtConcurrent::run([this, response]() {
+        return createSyntheticComputer(response);
+    });
+    watcher->setFuture(future);
 }
 
 bool AirPCStreamBridge::isStreamActive() const

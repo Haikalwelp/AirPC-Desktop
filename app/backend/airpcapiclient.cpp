@@ -13,6 +13,8 @@
 #include <QCoreApplication>
 #include <QSysInfo>
 #include <QDateTime>
+#include <QtConcurrent>
+#include <QFutureWatcher>
 
 static AirPCStreamLaunchResponse parseSharedPoolSession(const QJsonObject& session,
                                                         const QString& fallbackTitle = QString())
@@ -1180,28 +1182,63 @@ void AirPCApiClient::endSession()
 
     qInfo() << "AirPCApiClient: Ending session" << m_activeSession.sessionId;
 
-    // Step 1: Try to quit the app on the host first (matching Android's quitAppOnHost)
-    // This sends a quit command via NvHTTP to gracefully stop the game
-    quitAppOnHost();
+    // Step 1 & 2: Run host quit and API end in a background thread to prevent UI freezing
+    auto activeSession = m_activeSession;
+    auto apiBaseUrl = m_apiBaseUrl;
+    auto deviceId = getDeviceId();
+    
+    QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, activeSession, apiBaseUrl]() {
+        watcher->deleteLater();
+        
+        // Step 2: Send end session request to API (safe to do async via QNAM on main thread)
+        QNetworkRequest request = createRequest(apiBaseUrl + "/api/v1/sessions/end", false);
+        request.setRawHeader("X-Session-Token", activeSession.sessionToken.toUtf8());
 
-    // Step 2: Send end session request to API
-    QNetworkRequest request = createRequest(m_apiBaseUrl + "/api/v1/sessions/end", false);
-    request.setRawHeader("X-Session-Token", m_activeSession.sessionToken.toUtf8());
+        QNetworkReply* reply = m_nam.post(request, QByteArray());
+        connect(reply, &QNetworkReply::finished, this, [reply]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                qWarning() << "AirPCApiClient: End session API call failed (proceeding anyway):" 
+                           << reply->errorString();
+            } else {
+                qInfo() << "AirPCApiClient: Session ended via API";
+            }
+        });
 
-    QNetworkReply* reply = m_nam.post(request, QByteArray());
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            qWarning() << "AirPCApiClient: End session API call failed (proceeding anyway):" 
-                       << reply->errorString();
-        } else {
-            qInfo() << "AirPCApiClient: Session ended via API";
-        }
+        // Step 3: Clear local session
+        clearActiveSession();
+        emit sessionEnded();
     });
 
-    // Step 3: Clear local session
-    clearActiveSession();
-    emit sessionEnded();
+    QFuture<void> future = QtConcurrent::run([activeSession, apiBaseUrl, deviceId]() {
+        qInfo() << "AirPCApiClient: Attempting to quit app on host" << activeSession.hostname << "(Async)";
+        
+        try {
+            NvAddress address(activeSession.hostname, static_cast<uint16_t>(activeSession.port));
+            uint16_t httpsPort = static_cast<uint16_t>(activeSession.httpsPort > 0 ? activeSession.httpsPort : 47984);
+            
+            NvHTTP http(address, httpsPort, QSslCertificate());
+            http.setSessionToken(activeSession.sessionToken);
+            http.setGoApiBaseUrl(apiBaseUrl);
+            http.setDeviceId(deviceId);
+            
+            qInfo() << "AirPCApiClient: Sending quit command to" << activeSession.hostname << ":" << httpsPort;
+            http.quitApp();
+            qInfo() << "AirPCApiClient: Successfully quit app on host";
+            
+        } catch (const GfeHttpResponseException& e) {
+            if (e.getStatusCode() == 599) {
+                qWarning() << "AirPCApiClient: Host refused quit command (app not started by this client)";
+            } else {
+                qWarning() << "AirPCApiClient: Failed to quit app on host:" << e.toQString();
+            }
+        } catch (const std::exception& e) {
+            qWarning() << "AirPCApiClient: Exception quitting app on host:" << e.what();
+        }
+    });
+    
+    watcher->setFuture(future);
 }
 
 void AirPCApiClient::resumeSession()

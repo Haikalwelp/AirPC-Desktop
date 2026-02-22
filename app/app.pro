@@ -1,4 +1,4 @@
-QT += core quick network quickcontrols2 svg webenginequick
+QT += core quick network quickcontrols2 svg webenginequick concurrent
 CONFIG += c++11
 
 unix:!macx {
