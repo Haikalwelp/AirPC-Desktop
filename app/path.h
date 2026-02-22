@@ -9,6 +9,7 @@ public:
     static QString getLogDir();
     static QString getBoxArtCacheDir();
     static QString getQmlCacheDir();
+    static QString getNetworkCacheDir();
 
     static QByteArray readDataFile(QString fileName);
     static void writeCacheFile(QString fileName, QByteArray data);
@@ -25,4 +26,5 @@ private:
     static QString s_LogDir;
     static QString s_BoxArtCacheDir;
     static QString s_QmlCacheDir;
+    static QString s_NetworkCacheDir;
 };

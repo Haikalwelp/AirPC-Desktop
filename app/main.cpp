@@ -18,6 +18,7 @@
 #include <QQmlNetworkAccessManagerFactory>
 #include <QSslError>
 #include <QUrl>
+#include <QNetworkDiskCache>
 
 // Don't let SDL hook our main function, since Qt is already
 // doing the same thing. This needs to be before any headers
@@ -98,6 +99,10 @@ public:
     explicit DebugQmlNetworkAccessManager(QObject* parent = nullptr)
         : QNetworkAccessManager(parent)
     {
+        QNetworkDiskCache* diskCache = new QNetworkDiskCache(this);
+        diskCache->setCacheDirectory(Path::getNetworkCacheDir());
+        diskCache->setMaximumCacheSize(100 * 1024 * 1024); // 100 MB limit
+        setCache(diskCache);
     }
 
 protected:
