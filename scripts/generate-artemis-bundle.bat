@@ -46,10 +46,10 @@ if not exist "%BUILD_ROOT%\build-x64-%BUILD_CONFIG%\Artemis.msi" (
     echo You must run 'build-artemis-arch.bat %BUILD_CONFIG%' first
     exit /b 1
 )
+set BUNDLE_DEFINE_CONSTANTS=
 if not exist "%BUILD_ROOT%\build-arm64-%BUILD_CONFIG%\Artemis.msi" (
-    echo Unable to build bundle - missing binaries for %BUILD_CONFIG% arm64
-    echo You must run 'build-artemis-arch.bat %BUILD_CONFIG%' first
-    exit /b 1
+    echo ARM64 Artemis.msi not found - building x64-only bundle
+    set BUNDLE_DEFINE_CONSTANTS=X64_ONLY
 )
 
 echo Cleaning output directories
@@ -67,7 +67,7 @@ if !ERRORLEVEL! NEQ 0 goto Error
 
 echo Building universal Artemis bundle
 rem Bundles are always x86 binaries
-msbuild -Restore %SOURCE_ROOT%\wix\ArtemisSetup\ArtemisSetup.wixproj /p:Configuration=%BUILD_CONFIG% /p:Platform=x86 /p:MSBuildProjectExtensionsPath=%BUILD_FOLDER%\
+msbuild -Restore %SOURCE_ROOT%\wix\ArtemisSetup\ArtemisSetup.wixproj /p:Configuration=%BUILD_CONFIG% /p:Platform=x86 /p:MSBuildProjectExtensionsPath=%BUILD_FOLDER%\ /p:DefineConstants=%BUNDLE_DEFINE_CONSTANTS%
 if !ERRORLEVEL! NEQ 0 goto Error
 
 rem Rename the installer to match the publishing convention

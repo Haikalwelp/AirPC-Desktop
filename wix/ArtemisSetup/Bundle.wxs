@@ -40,10 +40,12 @@
                         Result="version"
                         Variable="VCREDIST_14_x64" />
 
+    <?ifndef X64_ONLY ?>
     <util:ProductSearch Id="VCREDIST_14_ARM64"
                         UpgradeCode="$(var.VCREDIST_ARM64_UPGRADE_CODE)"
                         Result="version"
                         Variable="VCREDIST_14_ARM64" />
+    <?endif?>
 
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication ShowVersion="yes"
@@ -76,6 +78,7 @@
         <ExitCode Value="1638" Behavior="success" />
       </ExePackage>
 
+      <?ifndef X64_ONLY ?>
       <ExePackage Cache="remove"
                   PerMachine="yes"
                   Permanent="yes"
@@ -95,6 +98,7 @@
         <!-- Newer version installed is fine -->
         <ExitCode Value="1638" Behavior="success" />
       </ExePackage>
+      <?endif?>
 
       <MsiPackage Id="Artemis_x64"
                   SourceFile="$(env.BUILD_ROOT)\build-x64-$(env.BUILD_CONFIG)\Artemis.msi"
@@ -105,6 +109,7 @@
         <MsiProperty Name="ADDDESKTOPSHORTCUT" Value="[AddDesktopShortcutCheckbox]" />
       </MsiPackage>
 
+      <?ifndef X64_ONLY ?>
       <MsiPackage Id="Artemis_arm64"
                   SourceFile="$(env.BUILD_ROOT)\build-arm64-$(env.BUILD_CONFIG)\Artemis.msi"
                   Name="Artemis_arm64.msi"
@@ -113,6 +118,7 @@
         <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
         <MsiProperty Name="ADDDESKTOPSHORTCUT" Value="[AddDesktopShortcutCheckbox]" />
       </MsiPackage>
+      <?endif?>
     </Chain>
 
   </Bundle>
