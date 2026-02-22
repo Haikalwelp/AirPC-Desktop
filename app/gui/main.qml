@@ -15,6 +15,9 @@ import "." as App
 
 ApplicationWindow {
     property bool pollingActive: false
+    // Temporary kill switch for startup unmapped-gamepad warning dialog.
+    // Keep false to disable the feature safely without removing code.
+    property bool showUnmappedGamepadWarning: false
 
     // Set by SettingsView to force the back operation to pop all
     // pages except the initial view. This is required when doing
@@ -66,7 +69,7 @@ ApplicationWindow {
             }
         }
 
-        if (SystemProperties.unmappedGamepads) {
+        if (showUnmappedGamepadWarning && SystemProperties.unmappedGamepads) {
             unmappedGamepadDialog.unmappedGamepads = SystemProperties.unmappedGamepads
             unmappedGamepadDialog.open()
         }
