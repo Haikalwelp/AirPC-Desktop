@@ -38,21 +38,29 @@ if /I "%BUILD_CONFIG%"=="debug" (
 )
 
 
-rem Locate qmake and determine if we're using qmake.exe, qmake.bat, or qmake6.bat
+rem Prefer a fixed Qt kit path for reproducible builds
 set QMAKE_CMD=
-for %%Q in (qmake.bat qmake6.bat qmake.exe qmake6.exe) do (
-    where %%Q >nul 2>&1
-    if !ERRORLEVEL! EQU 0 if not defined QMAKE_CMD set QMAKE_CMD=%%Q
-)
-if not defined QMAKE_CMD (
-    echo Unable to find QMake. Did you add Qt bins to your PATH?
-    goto Error
-)
-
-rem Find Qt path to determine our architecture
 set QT_PATH=
-for %%Q in (qmake.bat qmake6.bat qmake.exe qmake6.exe) do (
-    for /F %%i in ('where %%Q 2^>nul') do if not defined QT_PATH set QT_PATH=%%i
+set PREFERRED_QMAKE=E:\qtt\6.9.0\msvc2022_64\bin\qmake.exe
+if exist "%PREFERRED_QMAKE%" (
+    echo Using preferred qmake: %PREFERRED_QMAKE%
+    set QMAKE_CMD=%PREFERRED_QMAKE%
+    set QT_PATH=E:\qtt\6.9.0\msvc2022_64\bin
+) else (
+    rem Locate qmake and determine if we're using qmake.exe, qmake.bat, or qmake6.bat
+    for %%Q in (qmake.bat qmake6.bat qmake.exe qmake6.exe) do (
+        where %%Q >nul 2>&1
+        if !ERRORLEVEL! EQU 0 if not defined QMAKE_CMD set QMAKE_CMD=%%Q
+    )
+    if not defined QMAKE_CMD (
+        echo Unable to find QMake. Did you add Qt bins to your PATH?
+        goto Error
+    )
+
+    rem Find Qt path to determine our architecture
+    for %%Q in (qmake.bat qmake6.bat qmake.exe qmake6.exe) do (
+        for /F %%i in ('where %%Q 2^>nul') do if not defined QT_PATH set QT_PATH=%%i
+    )
 )
 
 rem Strip the qmake filename off the end to get the Qt bin directory itself
