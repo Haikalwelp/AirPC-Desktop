@@ -219,7 +219,17 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->activeAddress = http.address();
     this->state = NvComputer::CS_ONLINE;
     this->pendingQuit = false;
-    this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
+    // Only enforce GFE version compatibility for real NVIDIA server software.
+    // Apollo/Sunshine-derived hosts may expose a GfeVersion value that doesn't map
+    // to Moonlight's NVIDIA compatibility matrix and should not be blocked.
+    this->isSupportedServerVersion = !this->isNvidiaServerSoftware ||
+                                     CompatFetcher::isGfeVersionSupported(this->gfeVersion);
+    qInfo() << "NvComputer: compatibility evaluation"
+            << "name:" << this->name
+            << "state_is_mjolnir:" << this->isNvidiaServerSoftware
+            << "gfeVersion:" << this->gfeVersion
+            << "apolloVersion:" << this->apolloVersion
+            << "isSupportedServerVersion:" << this->isSupportedServerVersion;
     
     // Parse server commands (Apollo/Sunshine servers only)
     this->serverCommands = NvHTTP::getXmlArray(serverInfo, "ServerCommand");

@@ -143,8 +143,28 @@ NvComputer* AirPCStreamBridge::createSyntheticComputer(const AirPCStreamLaunchRe
     
     // Create NvHTTP instance pointing to the Apollo server
     NvAddress serverAddress(response.streamHost, static_cast<uint16_t>(response.streamPort));
-    uint16_t httpsPort = static_cast<uint16_t>(response.streamHttpsPort > 0 ? response.streamHttpsPort : DEFAULT_HTTPS_PORT);
-    
+    uint16_t httpsPort = static_cast<uint16_t>(response.streamHttpsPort);
+
+    if (httpsPort == 0) {
+        qInfo() << "AirPCStreamBridge: streamHttpsPort is 0. Attempting to discover via HTTP GET /serverinfo...";
+        NvHTTP httpDiscovery(serverAddress, 0, QSslCertificate());
+        try {
+            // true for fastFail so we don't hang too long on dead hosts
+            QString discoveryInfo = httpDiscovery.getServerInfo(NvHTTP::NVLL_ERROR, true);
+            QString portStr = NvHTTP::getXmlString(discoveryInfo, "HttpsPort");
+            if (!portStr.isEmpty() && portStr.toUShort() > 0) {
+                httpsPort = portStr.toUShort();
+                qInfo() << "AirPCStreamBridge: Discovered HTTPS port:" << httpsPort;
+            } else {
+                httpsPort = DEFAULT_HTTPS_PORT;
+                qWarning() << "AirPCStreamBridge: HTTPS port not in XML, defaulting to" << httpsPort;
+            }
+        } catch (const std::exception& e) {
+            httpsPort = DEFAULT_HTTPS_PORT;
+            qWarning() << "AirPCStreamBridge: Discovery failed, defaulting to" << httpsPort << ". Error:" << e.what();
+        }
+    }
+
     // Create NvHTTP with empty cert - we'll use token auth instead
     NvHTTP http(serverAddress, httpsPort, QSslCertificate());
     
@@ -175,11 +195,20 @@ NvComputer* AirPCStreamBridge::createSyntheticComputer(const AirPCStreamLaunchRe
         // Force state to online/paired (we just got serverinfo successfully)
         computer->state = NvComputer::CS_ONLINE;
         computer->pairState = NvComputer::PS_PAIRED;
+
+        // API-session launches are token-authorized and should not be blocked by
+        // GeForce Experience compatibility matrix checks.
+        computer->isSupportedServerVersion = true;
         
         qInfo() << "AirPCStreamBridge: Computer created from real serverinfo:"
                 << "name:" << computer->name
                 << "uuid:" << computer->uuid
                 << "appVersion:" << computer->appVersion
+                << "gfeVersion:" << computer->gfeVersion
+                << "apolloVersion:" << computer->apolloVersion
+                << "isNvidiaServerSoftware:" << computer->isNvidiaServerSoftware
+                << "isApiSession:" << computer->isApiSession
+                << "isSupportedServerVersion:" << computer->isSupportedServerVersion
                 << "serverCodecModeSupport:" << computer->serverCodecModeSupport
                 << "maxLumaPixelsHEVC:" << computer->maxLumaPixelsHEVC;
         
@@ -205,6 +234,7 @@ NvComputer* AirPCStreamBridge::createFallbackComputer(const AirPCStreamLaunchRes
     computer->activeHttpsPort = static_cast<uint16_t>(response.streamHttpsPort > 0 ? response.streamHttpsPort : DEFAULT_HTTPS_PORT);
     computer->state = NvComputer::CS_ONLINE;
     computer->pairState = NvComputer::PS_PAIRED;
+    computer->isSupportedServerVersion = true;
 
     computer->isApiSession = true;
     computer->sessionToken = response.sessionToken;

@@ -1068,6 +1068,18 @@ void Session::emitLaunchWarning(QString text)
 
 bool Session::validateLaunch(SDL_Window* testWindow)
 {
+    if (m_Computer->isApiSession) {
+        m_Computer->isSupportedServerVersion = true;
+    }
+
+    qInfo() << "Session::validateLaunch compatibility"
+            << "host:" << m_Computer->name
+            << "isApiSession:" << m_Computer->isApiSession
+            << "isNvidiaServerSoftware:" << m_Computer->isNvidiaServerSoftware
+            << "gfeVersion:" << m_Computer->gfeVersion
+            << "apolloVersion:" << m_Computer->apolloVersion
+            << "isSupportedServerVersion:" << m_Computer->isSupportedServerVersion;
+
     if (!m_Computer->isSupportedServerVersion) {
         emit displayLaunchError(tr("The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.").arg(m_Computer->name));
         return false;
