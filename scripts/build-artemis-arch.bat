@@ -80,7 +80,7 @@ if not x%QT_PATH:_arm64=%==x%QT_PATH% (
 
     if exist %QT_PATH%\windeployqt.exe (
         echo Using windeployqt.exe from QT_PATH
-        set WINDEPLOYQT_CMD=windeployqt.exe
+        set WINDEPLOYQT_CMD=%QT_PATH%\windeployqt.exe
     ) else (
         echo Using windeployqt.exe from HOSTBIN_PATH
         set WINDEPLOYQT_CMD=!HOSTBIN_PATH!\windeployqt.exe --qtpaths %QT_PATH%\qtpaths.bat
@@ -88,11 +88,11 @@ if not x%QT_PATH:_arm64=%==x%QT_PATH% (
 ) else (
     if not x%QT_PATH:_64=%==x%QT_PATH% (
         set ARCH=x64
-        set WINDEPLOYQT_CMD=windeployqt.exe
+        set WINDEPLOYQT_CMD=%QT_PATH%\windeployqt.exe
     ) else (
         if not x%QT_PATH:msvc=%==x%QT_PATH% (
             set ARCH=x86
-            set WINDEPLOYQT_CMD=windeployqt.exe
+            set WINDEPLOYQT_CMD=%QT_PATH%\windeployqt.exe
         ) else (
             echo Unable to determine Qt architecture
             goto Error
