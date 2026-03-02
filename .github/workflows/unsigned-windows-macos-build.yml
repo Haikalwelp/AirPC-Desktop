@@ -1,0 +1,103 @@
+name: Unsigned Windows and macOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - dev
+      - main
+      - master
+
+env:
+  QT_VERSION: '6.8.3'
+
+jobs:
+  build-windows-unsigned:
+    name: Build Windows Unsigned
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build unsigned Windows artifacts
+        run: |
+          $env:PATH = "$env:Qt6_DIR\bin;$env:PATH"
+          cmd /c "scripts\build-artemis-arch.bat release"
+
+          if ($LASTEXITCODE -ne 0) {
+            echo "Build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload unsigned Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artemis-windows-unsigned-${{ github.run_number }}
+          path: |
+            build/installer-x64-release/*.msi
+            build/installer-x64-release/ArtemisPortable-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  build-macos-unsigned:
+    name: Build macOS Unsigned
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          modules: qtmultimedia
+
+      - name: Install build dependencies
+        run: |
+          brew update
+          brew install create-dmg ffmpeg opus sdl2 sdl2_ttf
+
+      - name: Build unsigned macOS DMG
+        run: |
+          VERSION="$(tr -d '\r\n' < app/version.txt)"
+          chmod +x scripts/generate-dmg.sh
+
+          unset SIGNING_IDENTITY
+          unset SIGNING_PROVIDER_SHORTNAME
+          unset NOTARY_KEYCHAIN_PROFILE
+
+          ./scripts/generate-dmg.sh Release "$VERSION"
+
+      - name: Upload unsigned macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artemis-macos-unsigned-${{ github.run_number }}
+          path: |
+            build/installer-Release/Artemis-*.dmg
+            build/installer-Release/Artemis-*.dsym
+            build/installer-Release/build_info_macos.txt
+          if-no-files-found: error
+          retention-days: 30
