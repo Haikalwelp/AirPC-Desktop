@@ -32,7 +32,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: qtmultimedia
+          modules: 'qtmultimedia qtwebengine'
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -74,7 +74,7 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: mac
           target: desktop
-          modules: qtmultimedia
+          modules: 'qtmultimedia qtwebengine'
 
       - name: Install build dependencies
         run: |
