@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - airpc-v1
       - develop
       - dev
       - main
