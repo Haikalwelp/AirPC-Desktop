@@ -1,0 +1,100 @@
+name: Windows Tag Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: '6.8.3'
+
+jobs:
+  build-and-release-windows:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build release MSI
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:Qt6_DIR\bin;$env:PATH"
+          cmd /c "scripts\build-artemis-arch.bat release"
+          if ($LASTEXITCODE -ne 0) {
+            throw "build-artemis-arch.bat failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Build release installer EXE
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:Qt6_DIR\bin;$env:PATH"
+          cmd /c "scripts\generate-artemis-bundle.bat release"
+          if ($LASTEXITCODE -ne 0) {
+            throw "generate-artemis-bundle.bat failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Resolve release assets
+        id: assets
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem -Path "build\installer-x64-release" -Filter "*.msi" | Select-Object -First 1
+          if (-not $msi) {
+            Write-Host "MSI not found under build\\installer-x64-release"
+            Get-ChildItem -Path "build" -Recurse
+            throw "Missing MSI asset"
+          }
+
+          $installer = Get-ChildItem -Path "build\installer-release" -Filter "AirPCSetup-*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            Write-Host "Installer EXE not found under build\\installer-release"
+            Get-ChildItem -Path "build" -Recurse
+            throw "Missing installer EXE asset"
+          }
+
+          "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          "installer_path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-${{ github.ref_name }}
+          path: |
+            ${{ steps.assets.outputs.msi_path }}
+            ${{ steps.assets.outputs.installer_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ steps.assets.outputs.msi_path }}
+            ${{ steps.assets.outputs.installer_path }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true

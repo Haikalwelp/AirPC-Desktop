@@ -50,8 +50,6 @@
 #include <QtEndian>
 #include <QCoreApplication>
 #include <QThreadPool>
-#include <QSvgRenderer>
-#include <QPainter>
 #include <QImage>
 #include <QGuiApplication>
 #include <QCursor>
@@ -2120,18 +2118,20 @@ void Session::execInternal()
                     "QuickMenuManager is null when trying to set geometry");
     }
 
-    QSvgRenderer svgIconRenderer(QString(":/res/artemis.svg"));
-    QImage svgImage(ICON_SIZE, ICON_SIZE, QImage::Format_RGBA8888);
-    svgImage.fill(0);
-
-    QPainter svgPainter(&svgImage);
-    svgIconRenderer.render(&svgPainter);
-    SDL_Surface* iconSurface = SDL_CreateRGBSurfaceWithFormatFrom((void*)svgImage.constBits(),
-                                                                  svgImage.width(),
-                                                                  svgImage.height(),
-                                                                  32,
-                                                                  4 * svgImage.width(),
-                                                                  SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface* iconSurface = nullptr;
+    QImage iconImage(":/airpc-logo.png");
+    if (!iconImage.isNull()) {
+        QImage scaledIcon = iconImage.scaled(ICON_SIZE,
+                                             ICON_SIZE,
+                                             Qt::KeepAspectRatio,
+                                             Qt::SmoothTransformation);
+        iconSurface = SDL_CreateRGBSurfaceWithFormatFrom((void*)scaledIcon.constBits(),
+                                                         scaledIcon.width(),
+                                                         scaledIcon.height(),
+                                                         32,
+                                                         4 * scaledIcon.width(),
+                                                         SDL_PIXELFORMAT_RGBA32);
+    }
 #ifndef Q_OS_DARWIN
     // Other platforms seem to preserve our Qt icon when creating a new window.
     if (iconSurface != nullptr) {

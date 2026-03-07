@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop">
+	<id>com.airpc_desktop.AirPC</id>
+	<metadata_license>CC0-1.0</metadata_license>
+	<project_license>GPL-3.0+</project_license>
+	<name>AirPC</name>
+	<summary>Stream games and other applications from another PC running Sunshine or GeForce Experience</summary>
+
+	<description>
+		<p>AirPC can stream games and other applications from another PC with Sunshine or GeForce Experience software installed.</p>
+		<p>Features include:</p>
+		<ul>
+			<li>Hardware accelerated video decoding with VAAPI, VDPAU, and NVDEC support</li>
+			<li>H.264, HEVC, and AV1 codec support</li>
+			<li>7.1 surround sound audio support</li>
+			<li>10-point multitouch support</li>
+			<li>Gamepad support with force feedback for up to 16 players</li>
+			<li>Support for both pointer capture (for games) and direct mouse control (for remote desktop)</li>
+			<li>Support for passing system-wide keyboard shortcuts like Alt+Tab to the host</li>
+		</ul>
+	</description>
+
+	<url type="homepage">https://github.com/Haikalwelp/AirPC-Desktop</url>
+	<url type="bugtracker">https://github.com/Haikalwelp/AirPC-Desktop/issues</url>
+	<url type="help">https://github.com/Haikalwelp/AirPC-Desktop/wiki</url>
+
+	<screenshots>
+		<screenshot type="default">
+			<image>https://moonlight-stream.org/appstream_resources/moonlight_screenshot_1.png</image>
+		</screenshot>
+		<screenshot>
+			<image>https://moonlight-stream.org/appstream_resources/moonlight_screenshot_2.png</image>
+		</screenshot>
+	</screenshots>
+
+	<developer_name>AirPC</developer_name>
+	<update_contact>support@airpc.co</update_contact>
+
+	<launchable type="desktop-id">com.airpc_desktop.AirPC.desktop</launchable>
+
+	<provides>
+		<binary>airpc</binary>
+	</provides>
+
+	<content_rating type="oars-1.0" />
+</component>

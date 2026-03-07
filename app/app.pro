@@ -2,10 +2,10 @@ QT += core quick network quickcontrols2 svg webenginequick concurrent
 CONFIG += c++11
 
 unix:!macx {
-    TARGET = artemis
+    TARGET = airpc
 } else {
     # On macOS, this is the name displayed in the global menu bar
-    TARGET = Artemis
+    TARGET = AirPC
 }
 
 include(../globaldefs.pri)
@@ -567,22 +567,22 @@ unix:!macx: {
 
     target.path = $$PREFIX/$$BINDIR/
 
-    desktop.files = deploy/linux/com.artemis_desktop.Artemis.desktop
+    desktop.files = deploy/linux/com.airpc_desktop.AirPC.desktop
     desktop.path = $$PREFIX/$$DATADIR/applications/
 
-    icons.files = res/artemis.svg
-    icons.path = $$PREFIX/$$DATADIR/icons/hicolor/scalable/apps/
+    icons.files = airpc-logo.png
+    icons.path = $$PREFIX/$$DATADIR/icons/hicolor/256x256/apps/
 
-    appstream.files = deploy/linux/com.artemis_desktop.Artemis.appdata.xml
+    appstream.files = deploy/linux/com.airpc_desktop.AirPC.appdata.xml
     appstream.path = $$PREFIX/$$DATADIR/metainfo/
 
     INSTALLS += target desktop icons appstream
 }
 win32 {
-    RC_ICONS = artemis.ico
-    QMAKE_TARGET_COMPANY = Artemis Desktop Project
-    QMAKE_TARGET_DESCRIPTION = Artemis Game Streaming Client
-    QMAKE_TARGET_PRODUCT = Artemis
+    RC_ICONS = airpc-logo.ico
+    QMAKE_TARGET_COMPANY = AirPC
+    QMAKE_TARGET_DESCRIPTION = AirPC Game Streaming Client
+    QMAKE_TARGET_PRODUCT = AirPC
 
     CONFIG -= embed_manifest_exe
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/Artemis.exe.manifest
@@ -594,7 +594,7 @@ macx {
 
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 
-    APP_BUNDLE_RESOURCES.files = artemis.icns
+    APP_BUNDLE_RESOURCES.files = airpc-logo.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
 
     APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist

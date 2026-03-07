@@ -11,19 +11,19 @@
 
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
-  <Bundle Name="Artemis Game Streaming Client"
+  <Bundle Name="AirPC Game Streaming Client"
           Version="!(bind.PackageVersion.Artemis_x64)"
-          Manufacturer="Artemis Desktop Project"
+          Manufacturer="AirPC"
           UpgradeCode="b9e5d2a7-3c8f-4a91-9e4b-1f7c6a8d5e2b"
-          HelpUrl="https://github.com/wjbeckett/artemis/wiki/Setup-Guide"
-          UpdateUrl="https://github.com/wjbeckett/artemis/releases"
+          HelpUrl="https://github.com/Haikalwelp/AirPC-Desktop/wiki/Setup-Guide"
+          UpdateUrl="https://github.com/Haikalwelp/AirPC-Desktop/releases"
           DisableModify="yes"
-          IconSourceFile="..\..\app\artemis.ico">
+          IconSourceFile="..\..\app\airpc-logo.ico">
 
-    <bal:Condition Message="This version of Artemis requires Windows 10 or later." Condition="VersionNT &gt;= v10.0" />
-    <bal:Condition Message="This version of Artemis requires a 64-bit version of Windows." Condition="NativeMachine &lt;&gt; 332" />
+    <bal:Condition Message="This version of AirPC requires Windows 10 or later." Condition="VersionNT &gt;= v10.0" />
+    <bal:Condition Message="This version of AirPC requires a 64-bit version of Windows." Condition="NativeMachine &lt;&gt; 332" />
 
-    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles6432Folder]Artemis Game Streaming" />
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles6432Folder]AirPC" />
 
     <!-- Define "Add desktop shortcut" -checkbox's state by defining a variable
          which has same name as the checkbox has. Value 1 means that checkbox
@@ -32,8 +32,8 @@
     <Variable Name="AddDesktopShortcutCheckbox" Type="numeric" Value="1" />
     <!-- Get checkbox's state from registry if present. The registry value
          "DesktopShortcutInstallState" is set in Product.wxs. -->
-    <util:RegistrySearch Variable="HasDesktopShortcutInstallStateRegKey" Root="HKCU" Key="Software\Artemis Desktop Project" Value="DesktopShortcutInstallState" Result="exists" />
-    <util:RegistrySearch Variable="AddDesktopShortcutCheckbox" Root="HKCU" Key="Software\Artemis Desktop Project" Value="DesktopShortcutInstallState" Condition="HasDesktopShortcutInstallStateRegKey" />
+    <util:RegistrySearch Variable="HasDesktopShortcutInstallStateRegKey" Root="HKCU" Key="Software\AirPC" Value="DesktopShortcutInstallState" Result="exists" />
+    <util:RegistrySearch Variable="AddDesktopShortcutCheckbox" Root="HKCU" Key="Software\AirPC" Value="DesktopShortcutInstallState" Condition="HasDesktopShortcutInstallStateRegKey" />
 
     <util:ProductSearch Id="VCREDIST_14_x64"
                         UpgradeCode="$(var.VCREDIST_X64_UPGRADE_CODE)"
@@ -48,11 +48,11 @@
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication ShowVersion="yes"
                                               LicenseFile="license.rtf"
-                                              LogoFile="..\..\app\artemis_wix.png"
-                                              LaunchTarget="[InstallFolder]\Artemis.exe"
+                                              LogoFile="..\..\app\airpc-logo.png"
+                                              LaunchTarget="[InstallFolder]\AirPC.exe"
                                               ThemeFile="RtfTheme.xml"
                                               Theme="rtfLicense" />
-      <Payload Name="artemis.ico" SourceFile="..\..\app\artemis.ico" Compressed="yes" />
+      <Payload Name="airpc-logo.ico" SourceFile="..\..\app\airpc-logo.ico" Compressed="yes" />
     </BootstrapperApplication>
 
     <Chain>

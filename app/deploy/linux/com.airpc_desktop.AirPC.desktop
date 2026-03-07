@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=Artemis
+Name=AirPC
 Comment=Stream games and other applications from another PC running Sunshine or GeForce Experience
-Exec=artemis
-Icon=artemis
+Exec=airpc
+Icon=airpc-logo
 Terminal=false
 Type=Application
 Categories=Qt;Game;Network;RemoteAccess;
-Keywords=nvidia;gamestream;stream;sunshine;remote play;
+Keywords=airpc;gamestream;stream;sunshine;remote play;

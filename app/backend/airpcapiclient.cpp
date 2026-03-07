@@ -854,7 +854,7 @@ void AirPCApiClient::fetchCatalogGames()
                         << "url=" << probeUrl;
 
                 QNetworkRequest probeRequest = createRequest(probeUrl, false);
-                probeRequest.setRawHeader("User-Agent", "Artemis-Qt-IconProbe");
+                probeRequest.setRawHeader("User-Agent", "AirPC-Qt-IconProbe");
 
                 QNetworkReply* probeReply = m_nam.get(probeRequest);
 

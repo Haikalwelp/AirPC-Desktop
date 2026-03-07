@@ -42,14 +42,14 @@ set INSTALLER_FOLDER=%BUILD_ROOT%\installer-%BUILD_CONFIG%
 set /p VERSION=<%SOURCE_ROOT%\app\version.txt
 
 rem Ensure that all architectures have been built before the final bundle
-if not exist "%BUILD_ROOT%\build-x64-%BUILD_CONFIG%\Artemis.msi" (
+if not exist "%BUILD_ROOT%\installer-x64-%BUILD_CONFIG%\Artemis.msi" (
     echo Unable to build bundle - missing binaries for %BUILD_CONFIG% x64
     echo You must run 'build-artemis-arch.bat %BUILD_CONFIG%' first
     exit /b 1
 )
 set BUNDLE_DEFINE_CONSTANTS=
-if not exist "%BUILD_ROOT%\build-arm64-%BUILD_CONFIG%\Artemis.msi" (
-    echo ARM64 Artemis.msi not found - building x64-only bundle
+if not exist "%BUILD_ROOT%\installer-arm64-%BUILD_CONFIG%\Artemis.msi" (
+    echo ARM64 AirPC package not found - building x64-only bundle
     set BUNDLE_DEFINE_CONSTANTS=X64_ONLY
 )
 
@@ -66,15 +66,15 @@ for /f "usebackq delims=" %%i in (`%VSWHERE% -latest -property installationPath`
 )
 if !ERRORLEVEL! NEQ 0 goto Error
 
-echo Building universal Artemis bundle
+echo Building universal AirPC bundle
 rem Bundles are always x86 binaries
 msbuild -Restore %SOURCE_ROOT%\wix\ArtemisSetup\ArtemisSetup.wixproj /p:Configuration=%BUILD_CONFIG% /p:Platform=x86 /p:MSBuildProjectExtensionsPath=%BUILD_FOLDER%\ /p:DefineConstants=%BUNDLE_DEFINE_CONSTANTS%
 if !ERRORLEVEL! NEQ 0 goto Error
 
 rem Rename the installer to match the publishing convention
-ren %INSTALLER_FOLDER%\ArtemisSetup.exe ArtemisSetup-%VERSION%.exe
+ren %INSTALLER_FOLDER%\ArtemisSetup.exe AirPCSetup-%VERSION%.exe
 
-echo Build successful for Artemis v%VERSION% universal installer!
+echo Build successful for AirPC v%VERSION% universal installer!
 exit /b 0
 
 :Error
